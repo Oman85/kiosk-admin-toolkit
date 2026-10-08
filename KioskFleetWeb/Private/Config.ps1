@@ -106,8 +106,9 @@ function Get-KfwSettings {
         if ($path) {
             try { return ([IO.File]::ReadAllText($path)).Trim() } catch { return $Default }
         }
+        # Empty is unset: pwsh 7.6 (.NET 10) keeps a variable set to $null as ''.
         $v = [Environment]::GetEnvironmentVariable($Name)
-        if ($null -ne $v) { return $v }
+        if ($v) { return $v }
         if ($file.ContainsKey($Name)) { return $file[$Name] }
         return $Default
     }

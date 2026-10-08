@@ -280,7 +280,7 @@ function Test-ShareSettings {
         [Environment]::SetEnvironmentVariable('KFW_ROOT_TEMPLATE', $null)
         Set-TestText (Join-Path $d 'kfw.env') "# a comment`nKFW_SHARE='\\{0}\FromFile'`nKFW_SITE_NAME=Plant 7`n"
         $s = Get-KfwSettings -DataDir $d
-        Assert-That ($s.ShareTemplate -eq '\\{0}\FromFile' -and $s.SiteName -eq 'Plant 7') 'kfw.env is read'
+        Assert-That ($s.ShareTemplate -eq '\\{0}\FromFile' -and $s.SiteName -eq 'Plant 7') "kfw.env is read (share '$($s.ShareTemplate)', site '$($s.SiteName)')"
     } finally {
         foreach ($n in $names) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) }
     }

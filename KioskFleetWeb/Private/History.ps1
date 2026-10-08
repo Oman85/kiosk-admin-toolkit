@@ -194,9 +194,14 @@ function Get-KfwKioskHistory($Rows, [string]$HostName, [int]$Days = 28, [int]$Ke
     $closed = @($runs | Where-Object { -not $_.Open })
     $reversed = $runs.ToArray(); [Array]::Reverse($reversed)
     $out.Runs = $reversed
-    $out.LongestRunHours = if ($closed.Count) { ($closed | Measure-Object -Property Hours -Maximum).Maximum } else { $null }
-    $finished = @($closed | Where-Object { -not $_.Running })
-    $out.MeanRunHours = if ($finished.Count) { Get-KfwRound ((($finished | Measure-Object -Property Hours -Sum).Sum) / $finished.Count) 1 } else { $null }
+    # (By hand: Measure-Object -Property does not read a dictionary's keys.)
+    $longest = $null; $sum = 0.0; $finished = 0
+    foreach ($x in $closed) {
+        if ($null -eq $longest -or $x.Hours -gt $longest) { $longest = $x.Hours }
+        if (-not $x.Running) { $sum += $x.Hours; $finished++ }
+    }
+    $out.LongestRunHours = $longest
+    $out.MeanRunHours = if ($finished) { Get-KfwRound ($sum / $finished) 1 } else { $null }
     $up = $null
     for ($i = $statusRows.Count - 1; $i -ge 0; $i--) {
         $t = $statusRows[$i][0]; $r = $statusRows[$i][2]

@@ -657,7 +657,9 @@ function Invoke-KfwScan {
     # One scan of the fleet. Returns the exit code: 0, or 1 when something
     # could not be read or written.
     [CmdletBinding()]
-    param($Settings, [string]$ProgressFile, [switch]$DryRun)
+    param($Settings, [string]$ProgressFile, [switch]$DryRun,
+        # The scan's time, for the tests; the clock otherwise.
+        $Now = $null)
     if (-not $Settings) { $Settings = Get-KfwSettings }
     Initialize-KfwDirs $Settings
     $script:ScanLogPath = Join-Path (Get-KfwLogDir $Settings) 'collector.log'
@@ -677,7 +679,7 @@ function Invoke-KfwScan {
         return 0
     }
     try {
-        return (Invoke-KfwScanCore $Settings $progress $DryRun)
+        return (Invoke-KfwScanCore $Settings $progress $DryRun $Now)
     } catch {
         Write-KfwScanLog "Scan failed: $($_.Exception.Message)" 'ERROR'
         return 1
@@ -686,11 +688,11 @@ function Invoke-KfwScan {
     }
 }
 
-function Invoke-KfwScanCore($Settings, [scriptblock]$Progress, [bool]$DryRun) {
+function Invoke-KfwScanCore($Settings, [scriptblock]$Progress, [bool]$DryRun, $Now = $null) {
     $S = $Settings
     $exitCode = 0
     $start = Get-KfwMono
-    $u = [datetime]::UtcNow
+    $u = if ($Now) { ([datetime]$Now).ToUniversalTime() } else { [datetime]::UtcNow }
     $now = [datetime]::new($u.Year, $u.Month, $u.Day, $u.Hour, $u.Minute, $u.Second, [DateTimeKind]::Utc)
     $inv = [Globalization.CultureInfo]::InvariantCulture
     $scanId = $now.ToString("yyyyMMdd'T'HHmmss'Z'", $inv)

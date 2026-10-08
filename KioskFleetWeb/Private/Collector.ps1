@@ -638,6 +638,7 @@ function Invoke-KfwFetchAll($Kiosks, $S, [datetime]$Now, [scriptblock]$Progress)
 
 # --- one run -----------------------------------------------------------------------------------------
 $script:ScanLogPath = $null
+$script:ScanQuiet = $false
 
 function Write-KfwScanLog([string]$Message, [string]$Level = 'INFO') {
     $line = "[$([datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture))] [$Level] $Message"
@@ -648,7 +649,7 @@ function Write-KfwScanLog([string]$Message, [string]$Level = 'INFO') {
             [IO.File]::AppendAllText($p, $line + "`n")
         }
     } catch { }
-    [Console]::Out.WriteLine($line)
+    if (-not $script:ScanQuiet) { [Console]::Out.WriteLine($line) }
 }
 
 function Get-KfwRunnerName { "$([Environment]::UserName)@$([Net.Dns]::GetHostName())" }
@@ -659,10 +660,13 @@ function Invoke-KfwScan {
     [CmdletBinding()]
     param($Settings, [string]$ProgressFile, [switch]$DryRun,
         # The scan's time, for the tests; the clock otherwise.
-        $Now = $null)
+        $Now = $null,
+        # Only the log file, nothing on the console.
+        [switch]$Quiet)
     if (-not $Settings) { $Settings = Get-KfwSettings }
     Initialize-KfwDirs $Settings
     $script:ScanLogPath = Join-Path (Get-KfwLogDir $Settings) 'collector.log'
+    $script:ScanQuiet = [bool]$Quiet
     $progress = {
         param($Phase, $Index, $Total, $HostName = '')
         if (-not $ProgressFile) { return }
@@ -1060,7 +1064,9 @@ function Invoke-KfwScanCore($Settings, [scriptblock]$Progress, [bool]$DryRun, $N
         [void]$out.AppendLine().AppendLine('New events this run:')
         foreach ($t in (Get-KfwSorted @($byType.Keys) { param($x) $x })) { [void]$out.AppendLine("  $($t.PadRight(24)) $($byType[$t])") }
     }
-    [Console]::Out.Write($out.ToString())
-    [Console]::Out.Flush()
+    if (-not $script:ScanQuiet) {
+        [Console]::Out.Write($out.ToString())
+        [Console]::Out.Flush()
+    }
     return $exitCode
 }

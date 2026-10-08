@@ -140,7 +140,7 @@ foreach ($i in 1, 2) {
     $at = $now.AddMinutes(($i - 1) * 61)
     & python3 -I $pyFile $PythonRepo $dataPy $template $at.ToString('yyyy-MM-ddTHH:mm:ss') | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "the Python scan failed ($LASTEXITCODE)" }
-    $code = Invoke-KfwScan -Settings $settings -Now $at 6> $null
+    $code = Invoke-KfwScan -Settings $settings -Now $at -Quiet
     if ($code -ne 0) { throw "this scan failed ($code)" }
 }
 

@@ -15,12 +15,15 @@
 #>
 [CmdletBinding()]
 param(
-    # Test names or file names to run (wildcards).
-    [string[]]$Filter = @('*'),
+    # Test names or file names to run (wildcards), one or several - also
+    # as one comma-separated string, which is how pwsh -File passes them.
+    [Parameter(ValueFromRemainingArguments)][string[]]$Filter = @('*'),
     # Keep the test folders, to look at what a failed test left.
     [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
+$Filter = @($Filter | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if (-not $Filter.Count) { $Filter = @('*') }
 . (Join-Path $PSScriptRoot 'TestKit.ps1')
 
 $files = Get-ChildItem (Join-Path $PSScriptRoot '*.Tests.ps1') | Sort-Object Name

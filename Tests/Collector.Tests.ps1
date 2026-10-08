@@ -71,7 +71,7 @@ function Invoke-TestScan($Work) {
     # A scan id is to the second: never two in the same one.
     $ms = 1050 - [datetime]::UtcNow.Millisecond
     if ($ms -gt 0) { Start-Sleep -Milliseconds $ms }
-    $code = Invoke-KfwScan -Settings $Work.Settings
+    $code = Invoke-KfwScan -Settings $Work.Settings -Quiet
     Assert-Equal 0 $code 'the scan succeeds'
     return , (Read-KfwFleetCsv (Get-KfwLocalCsv $Work.Settings)).Rows
 }
@@ -154,7 +154,7 @@ function Test-ExcelSavedCsvIsLeftAlone {
     $w = New-TestWork
     [void](Set-TestKioskList $w "Host,Type,HasMwst`nMWEB1,Mach2,Y`n")
     Set-TestText (Get-KfwLocalCsv $w.Settings) "EventId;EventTimeUtc;EventType`n1;2;3`n"
-    Assert-Equal 1 (Invoke-KfwScan -Settings $w.Settings)
+    Assert-Equal 1 (Invoke-KfwScan -Settings $w.Settings -Quiet)
     Assert-That ((Get-Content -Raw (Get-KfwLocalCsv $w.Settings)).StartsWith('EventId;')) 'never overwritten with a copy missing its history'
 }
 

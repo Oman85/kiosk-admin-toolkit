@@ -45,7 +45,12 @@ function Write-KfwFileAtomic([string]$Path, [byte[]]$Data) {
     $tmp = Join-Path ([IO.Path]::GetDirectoryName($Path)) ('~' + [IO.Path]::GetFileName($Path) + '.' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.tmp')
     try {
         [IO.File]::WriteAllBytes($tmp, $Data)
-        [IO.File]::Move($tmp, $Path, $true)
+        # Windows refuses to replace a file someone is reading at that moment:
+        # a few tries, a moment apart.
+        for ($i = 1; ; $i++) {
+            try { [IO.File]::Move($tmp, $Path, $true); break }
+            catch { if ($i -ge 8) { throw }; Start-Sleep -Milliseconds (50 * $i) }
+        }
     } finally {
         if ([IO.File]::Exists($tmp)) { try { [IO.File]::Delete($tmp) } catch { } }
     }

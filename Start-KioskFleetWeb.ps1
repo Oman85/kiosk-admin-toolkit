@@ -30,5 +30,4 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'KioskFleetWeb\KioskFleetWeb.psd1') -Force
 $settings = Get-KfwSettings -DataDir $DataDir
 if ($Listen) { $settings.Listen = $Listen }
-$demoOn = $Demo -or ([string]$env:KFW_DEMO).ToLowerInvariant() -in '1', 'true', 'yes'
-Start-KfwServer -Settings $settings -Demo:$demoOn
+Start-KfwServer -Settings $settings -Demo:($Demo -or $settings.Demo)

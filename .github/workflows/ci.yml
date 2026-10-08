@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Caddy, for the test behind it
+        run: |
+          curl -fsSL https://github.com/caddyserver/caddy/releases/download/v2.8.4/caddy_2.8.4_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP" caddy
+          echo "KFW_TEST_CADDY=$RUNNER_TEMP/caddy" >> "$GITHUB_ENV"
+      - name: Tests
+        shell: pwsh
+        run: ./Tests/Run-Tests.ps1
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests
+        shell: pwsh
+        run: ./Tests/Run-Tests.ps1
+      - name: Install it on a pretend fleet
+        shell: pwsh
+        run: |
+          $pw = ConvertTo-SecureString 'Correct-Horse-42!' -AsPlainText -Force
+          ./Install-KioskFleetWeb.ps1 -Demo -SiteAddress https://localhost -AdminUser ciadmin -AdminPassword $pw
+      - name: Use it through Caddy
+        shell: pwsh
+        run: ./Tests/Test-Installed.ps1 -SiteAddress https://localhost -User ciadmin -Password 'Correct-Horse-42!'
+      - name: Its logs
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem C:\ProgramData\KioskFleetWeb\logs -File -ErrorAction SilentlyContinue | ForEach-Object { "===== $($_.Name)"; Get-Content $_.FullName -Tail 60 }
+      - name: Uninstall
+        if: always()
+        shell: pwsh
+        run: ./Install-KioskFleetWeb.ps1 -Uninstall -RemoveData

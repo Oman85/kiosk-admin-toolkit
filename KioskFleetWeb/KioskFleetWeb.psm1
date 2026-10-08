@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Off
 
 foreach ($part in 'TimeUtil', 'Csv', 'Config', 'Auth', 'Store', 'KioskFs', 'Remote', 'Launchers', 'LauncherOptions',
-    'KioskList', 'ListEditor', 'Collector', 'FleetState', 'History', 'Screens', 'Actions', 'Services', 'Server', 'Api', 'Demo') {
+    'KioskList', 'ListEditor', 'Collector', 'FleetState', 'History', 'Screens', 'Actions', 'Services', 'Server', 'Api', 'Demo', 'Deploy') {
     . (Join-Path $PSScriptRoot "Private\$part.ps1")
 }
 

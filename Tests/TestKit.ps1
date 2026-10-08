@@ -28,6 +28,13 @@ function ConvertTo-Canonical($Value) {
     return $Value
 }
 
+function Skip-Test([string]$Why) {
+    # Not run here (not Windows, no Caddy): said so, not counted as passed.
+    $e = [Exception]::new($Why)
+    $e.Data['KfwSkip'] = $true
+    throw $e
+}
+
 function Assert-Equal($Expected, $Actual, [string]$Message = '') {
     $e = ConvertTo-Json -InputObject (ConvertTo-Canonical $Expected) -Compress -Depth 10
     $a = ConvertTo-Json -InputObject (ConvertTo-Canonical $Actual) -Compress -Depth 10

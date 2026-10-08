@@ -35,6 +35,7 @@ $tests = foreach ($f in $files) {
 }
 
 $failed = [Collections.Generic.List[string]]::new()
+$skipped = 0
 $sw = [Diagnostics.Stopwatch]::StartNew()
 foreach ($t in $tests) {
     $one = [Diagnostics.Stopwatch]::StartNew()
@@ -42,6 +43,11 @@ foreach ($t in $tests) {
         & $t.Name
         Write-Host ('  ok    {0,-58} {1,5:N1}s' -f "$($t.File)::$($t.Name)", $one.Elapsed.TotalSeconds)
     } catch {
+        if ($_.Exception.Data.Contains('KfwSkip')) {
+            $skipped++
+            Write-Host ('  skip  {0,-58} {1}' -f "$($t.File)::$($t.Name)", $_.Exception.Message) -ForegroundColor DarkGray
+            continue
+        }
         $failed.Add("$($t.File)::$($t.Name)")
         Write-Host ('  FAIL  {0,-58} {1,5:N1}s' -f "$($t.File)::$($t.Name)", $one.Elapsed.TotalSeconds) -ForegroundColor Red
         Write-Host "        $($_.Exception.Message)" -ForegroundColor Red
@@ -56,7 +62,7 @@ foreach ($t in $tests) {
     }
 }
 Write-Host ''
-Write-Host ("{0} tests, {1} failed, {2:N0}s" -f @($tests).Count, $failed.Count, $sw.Elapsed.TotalSeconds)
+Write-Host ("{0} tests, {1} failed, {2} skipped, {3:N0}s" -f @($tests).Count, $failed.Count, $skipped, $sw.Elapsed.TotalSeconds)
 if (-not $Keep) { try { Remove-Item -LiteralPath $script:TestRoot -Recurse -Force -ErrorAction SilentlyContinue } catch { } }
 if ($failed.Count) { $failed | ForEach-Object { Write-Host "  failed: $_" -ForegroundColor Red }; exit 1 }
 exit 0

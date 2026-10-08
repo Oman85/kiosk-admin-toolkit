@@ -75,6 +75,8 @@ function New-KfwSettings {
         Listen                  = 'http://127.0.0.1:8081/'
         JobThreads              = 8
         RequestThreads          = 16
+        # A pretend fleet (KFW_DEMO): kiosks as folders in the data folder.
+        Demo                    = $false
         # For the tests: skip the network reachability check.
         OfflineOk               = $false
     }
@@ -186,6 +188,7 @@ function Get-KfwSettings {
     if ($t) { $s.TemplatesDir = $t }
     $l = & $get 'KFW_LISTEN'
     if ($l) { $s.Listen = $l }
+    $s.Demo = & $bool 'KFW_DEMO' $false
     $s.JobThreads = & $int 'KFW_JOB_THREADS' 8 1 64
     $s.RequestThreads = & $int 'KFW_REQUEST_THREADS' 16 2 128
     if ($s.SecureCookies -notin 'auto', 'true', 'false') { throw 'KFW_SECURE_COOKIES is auto, true or false' }

@@ -265,7 +265,8 @@ elseif ($CertificateFile) {
 }
 $caddyfile = Join-Path $DataDir 'caddy\Caddyfile'
 $text = Get-KfwCaddyfile -SiteAddress $SiteAddress -WebDir (Join-Path $InstallDir 'KioskFleetWeb\web') -Storage (Join-Path $DataDir 'caddy') `
-    -Tls $tls -CertificateFile $crt -KeyFile $key -Backend "127.0.0.1:$BackendPort" -LogFile (Join-Path $DataDir 'logs\caddy.log')
+    -Tls $tls -CertificateFile $crt -KeyFile $key -Backend "127.0.0.1:$BackendPort" -LogFile (Join-Path $DataDir 'logs\caddy.log') `
+    -ErrorLogFile (Join-Path $DataDir 'logs\caddy-errors.log')
 [IO.File]::WriteAllText($caddyfile, $text)
 $check = & $caddy validate --config $caddyfile --adapter caddyfile 2>&1
 if ($LASTEXITCODE) { throw "Caddy does not take the Caddyfile:`n$($check -join "`n")" }
@@ -274,9 +275,25 @@ if (Get-Service $CaddyService -ErrorAction SilentlyContinue) { Remove-Service $C
 $bin = "`"$caddy`" run --config `"$caddyfile`" --adapter caddyfile"
 New-Service -Name $CaddyService -BinaryPathName $bin -DisplayName 'Kiosk Fleet Web (Caddy)' -StartupType Automatic `
     -Description 'HTTPS for Kiosk Fleet Web: the page, and the way to the server on 127.0.0.1.' | Out-Null
-& sc.exe config $CaddyService obj= 'NT AUTHORITY\NetworkService' | Out-Null
+$out = & sc.exe config $CaddyService obj= 'NT AUTHORITY\NetworkService'
+if ($LASTEXITCODE) { throw "sc.exe could not set the account of ${CaddyService}:`n$($out -join "`n")" }
 & sc.exe failure $CaddyService reset= 86400 actions= restart/5000/restart/10000/restart/60000 | Out-Null
-Start-Service $CaddyService
+try {
+    Start-Service $CaddyService -ErrorAction Stop
+} catch {
+    # Say why: Windows' word on it, Caddy's own log, and Caddy run by hand.
+    Write-Warning "$CaddyService did not start: $($_.Exception.Message)"
+    Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager'; StartTime = (Get-Date).AddMinutes(-5) } -MaxEvents 10 -ErrorAction SilentlyContinue |
+        ForEach-Object { Write-Host "  event $($_.Id): $($_.Message)" }
+    $errFile = Join-Path $DataDir 'logs\caddy-errors.log'
+    if (Test-Path $errFile) { Get-Content $errFile -Tail 30 | ForEach-Object { Write-Host "  caddy: $_" } }
+    $o = Join-Path ([IO.Path]::GetTempPath()) "kfw-caddy-$PID.out"; $e = "$o.err"
+    $p = Start-Process $caddy -ArgumentList 'run', '--config', "`"$caddyfile`"", '--adapter', 'caddyfile' -NoNewWindow -PassThru `
+        -RedirectStandardOutput $o -RedirectStandardError $e
+    if (-not $p.WaitForExit(8000)) { $p.Kill($true); Write-Host '  caddy run by hand (as an administrator) keeps running' }
+    foreach ($f in $o, $e) { if (Test-Path $f) { Get-Content $f -Tail 30 | ForEach-Object { Write-Host "  caddy run: $_" }; Remove-Item $f -Force } }
+    throw
+}
 Say "service $CaddyService, as NETWORK SERVICE, started"
 
 Get-NetFirewallRule -Name $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule

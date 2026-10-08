@@ -37,6 +37,7 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem C:\ProgramData\KioskFleetWeb\logs -File -ErrorAction SilentlyContinue | ForEach-Object { "===== $($_.Name)"; Get-Content $_.FullName -Tail 60 }
+          "===== Caddyfile"; Get-Content C:\ProgramData\KioskFleetWeb\caddy\Caddyfile -ErrorAction SilentlyContinue
       - name: Uninstall
         if: always()
         shell: pwsh

@@ -15,7 +15,10 @@ function Get-KfwCaddyfile {
         [string]$CertificateFile,
         [string]$KeyFile,
         [string]$Backend = '127.0.0.1:8081',
-        [string]$LogFile
+        [string]$LogFile,
+        # Caddy's own messages (it starting, certificates, errors); as a
+        # service it has nowhere else to say them.
+        [string]$ErrorLogFile
     )
     $q = { param([string]$p) '"' + ($p -replace '\\', '/') + '"' }
     $tlsLine = switch ($Tls) {
@@ -24,6 +27,7 @@ function Get-KfwCaddyfile {
         default { '' }
     }
     $log = if ($LogFile) { "`tlog {`n`t`toutput file $(& $q $LogFile) {`n`t`t`troll_size 10MiB`n`t`t`troll_keep 5`n`t`t}`n`t}" } else { '' }
+    $errLog = if ($ErrorLogFile) { "`tlog {`n`t`toutput file $(& $q $ErrorLogFile) {`n`t`t`troll_size 10MiB`n`t`t`troll_keep 5`n`t`t}`n`t}`n" } else { '' }
     $csp = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     $hsts = if ($Tls -ne 'off') { "`t`tStrict-Transport-Security `"max-age=31536000`"`n" } else { '' }
     return @"
@@ -33,7 +37,7 @@ function Get-KfwCaddyfile {
 	admin off
 	storage file_system $(& $q $Storage)
 	skip_install_trust
-}
+$errLog}
 
 $SiteAddress {
 $tlsLine

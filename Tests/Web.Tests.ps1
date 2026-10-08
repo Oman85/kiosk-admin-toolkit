@@ -399,6 +399,29 @@ function Test-ImportPowerShellAccounts {
     Assert-Equal 200 (Connect-Test (New-TestClient $srv) 'oldtimer' 'Imported-Pass-11!').Status 'the server reads the change at once'
 }
 
+function Test-CommandLineSignsPeopleOut {
+    # A new password or disabling from Set-KioskFleetUser.ps1, while the server
+    # runs, ends that person's sessions there too.
+    $srv = Start-TestFleet
+    $op = New-TestOperator $srv
+    $cli = { param([string[]]$a)
+        $env:KFW_SETTINGS_JSON = $null
+        $env:KFW_NEW_PASSWORD = 'Brand-New-Pass-55!'
+        try { & (Get-KfwPwshPath) -NoProfile -File (Join-Path $script:Repo 'Set-KioskFleetUser.ps1') @a -DataDir $srv.Work.Data 2>&1 }
+        finally { $env:KFW_NEW_PASSWORD = $null }
+    }
+    $out = & $cli @('passwd', 'webop')
+    Assert-That (($out -join ' ').Contains('webop: new password')) ($out -join ' ')
+    Assert-Equal 401 (Get-Test $op '/api/state').Status 'the old session is over'
+    Assert-Equal 401 (Connect-Test (New-TestClient $srv) 'webop' $script:OpPass).Status 'the old password is gone'
+    $again = New-TestClient $srv
+    Assert-Equal 200 (Connect-Test $again 'webop' 'Brand-New-Pass-55!').Status 'the new one works'
+    $out = & $cli @('disable', 'webop')
+    Assert-Equal 401 (Get-Test $again '/api/state').Status 'disabled: signed out'
+    $listed = & $cli @('list')
+    Assert-That (($listed -join "`n") -match 'webop\s+operator\s+disabled') ($listed -join ' | ')
+}
+
 # --- settings ----------------------------------------------------------------------------------------
 function Test-KioskListUpload {
     $srv = Start-TestFleet

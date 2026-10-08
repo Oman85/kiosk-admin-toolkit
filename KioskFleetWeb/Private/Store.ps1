@@ -13,23 +13,25 @@
 function Get-KfwNowText { [datetime]::Now.ToString('yyyy-MM-ddTHH:mm:ss', [Globalization.CultureInfo]::InvariantCulture) }
 function Get-KfwEpoch { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 }
 
-function Open-KfwStore([string]$Dir) {
+function Open-KfwStore([string]$Dir, [switch]$Server) {
+    # -Server: the server's own, which keeps the sessions. The command line
+    # opens it without: it changes accounts, and leaves sessions to the server.
     [void][IO.Directory]::CreateDirectory($Dir)
-    $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($Dir).ToLowerInvariant()))).Substring(0, 16)
     $st = [hashtable]::Synchronized(@{
         Dir           = $Dir
+        Server        = [bool]$Server
         UsersPath     = Join-Path $Dir 'users.json'
         SessionsPath  = Join-Path $Dir 'sessions.json'
         AuditPath     = Join-Path $Dir 'audit.jsonl'
-        MutexName     = "KioskFleetWeb-store-$hash"
+        LockPath      = Join-Path $Dir 'users.lock'
         Lock          = [object]::new()
         Users         = $null
         UsersStamp    = ''
-        Sessions      = $null
+        Sessions      = [hashtable]::Synchronized(@{})
         SessionsDirty = $false
         Failures      = @{}
     })
-    Read-KfwSessions $st
+    if ($Server) { Read-KfwSessions $st }
     return $st
 }
 
@@ -58,16 +60,22 @@ function Write-KfwFileAtomic([string]$Path, [byte[]]$Data) {
 
 function Invoke-KfwStoreLocked($St, [scriptblock]$Body) {
     # One writer at a time: threads of this server, and the command line in
-    # another process, through a named mutex.
-    $m = [Threading.Mutex]::new($false, $St.MutexName)
-    $held = $false
+    # another process - another logon session, another account - through a
+    # lock file in the data folder, which Windows and Linux both honour.
     [Threading.Monitor]::Enter($St.Lock)
+    $file = $null
     try {
-        try { $held = $m.WaitOne(15000) } catch [Threading.AbandonedMutexException] { $held = $true }
+        $deadline = [datetime]::UtcNow.AddSeconds(15)
+        while (-not $file) {
+            try { $file = [IO.FileStream]::new($St.LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+            catch [IO.IOException] {
+                if ([datetime]::UtcNow -gt $deadline) { throw "the accounts are locked by another process ($($St.LockPath))" }
+                Start-Sleep -Milliseconds 50
+            }
+        }
         return (& $Body)
     } finally {
-        if ($held) { $m.ReleaseMutex() }
-        $m.Dispose()
+        if ($file) { $file.Dispose() }
         [Threading.Monitor]::Exit($St.Lock)
     }
 }
@@ -101,6 +109,7 @@ function ConvertTo-KfwUserView($u) {
     [ordered]@{
         name = [string]$u.Name; role = [string]$u.Role; disabled = [bool]$u.Disabled; must_change = [bool]$u.MustChange
         created = [string]$u.Created; updated = [string]$u.Updated; last_login = [string]$u.LastLogin
+        sessions_after = [double]$u.SessionsAfter
     }
 }
 
@@ -277,7 +286,8 @@ function Get-KfwSession($St, [string]$Token, [int]$IdleMinutes, [int]$SessionHou
     if (-not $s) { return $null }
     $u = Get-KfwUser $St ([string]$s.user)
     $now = Get-KfwEpoch
-    if (-not $u -or $u.disabled -or ($now - [double]$s.last_seen) -gt $IdleMinutes * 60 -or ($now - [double]$s.created) -gt $SessionHours * 3600) {
+    if (-not $u -or $u.disabled -or ($now - [double]$s.last_seen) -gt $IdleMinutes * 60 -or ($now - [double]$s.created) -gt $SessionHours * 3600 -or
+        [double]$s.created -lt $u.sessions_after) {
         $St.Sessions.Remove($th)
         Save-KfwSessions $St
         return $null
@@ -295,6 +305,13 @@ function Stop-KfwSession($St, [string]$TokenHash) {
 }
 
 function Stop-KfwSessionsOf($St, [string]$User, [string]$ExceptHash = '') {
+    if (-not $St.Server) {
+        # From the command line, while the server may hold the sessions: every
+        # session of this account from before now is void, wherever it is kept.
+        $now = Get-KfwEpoch
+        Set-KfwUserRecord $St $User { param($u) $u.SessionsAfter = $now }
+        return
+    }
     foreach ($k in @($St.Sessions.Keys)) {
         $s = $St.Sessions[$k]
         if ($s -and [string]::Equals([string]$s.user, $User, [StringComparison]::OrdinalIgnoreCase) -and $k -ne $ExceptHash) { $St.Sessions.Remove($k) }

@@ -8,7 +8,7 @@ function New-KfwApp($Settings) {
     Initialize-KfwDirs $Settings
     $App = [hashtable]::Synchronized(@{
         Settings      = $Settings
-        Store         = Open-KfwStore $Settings.DataDir
+        Store         = Open-KfwStore $Settings.DataDir -Server
         LogPath       = Join-Path (Get-KfwLogDir $Settings) 'server.log'
         Stopping      = $false
         SetupToken    = $null

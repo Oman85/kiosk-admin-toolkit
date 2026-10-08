@@ -71,7 +71,7 @@ Auto-scan starts by itself, every 15 minutes, once there is a list. *Scan now* r
 | `C:\ProgramData\KioskFleetWeb` | The data folder, open to administrators, SYSTEM and the service account only. `KFW_DATA_DIR` names it, machine-wide. |
 | Scheduled task **Kiosk Fleet Web** | `Start-KioskFleetWeb.ps1` at startup, as the service account, restarted every minute if it stops. Listens on `http://127.0.0.1:8081/`, reserved for that account (`netsh http show urlacl`). |
 | Service **KioskFleetCaddy** | Caddy, as NETWORK SERVICE, automatic, restarted on failure. Its config is `caddy\Caddyfile` in the data folder. |
-| Firewall rule **Kiosk Fleet Web (Caddy)** | 80 (to redirect) and 443, for Caddy only. |
+| Firewall rule **Kiosk Fleet Web (Caddy)** | The site's port (443) and 80 (to redirect to it), for Caddy only. 80 is left out when something else holds it (IIS, HTTP.sys) or with `-NoHttpRedirect`. |
 
 ### Finding the kiosks
 

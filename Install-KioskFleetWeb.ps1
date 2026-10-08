@@ -54,6 +54,10 @@ param(
     [string]$KeyFile,
     # No HTTPS at all: for trying it out on a closed network only.
     [switch]$HttpOnly,
+    # No redirect from http:// on port 80. Without it, port 80 is used when it
+    # is free (IIS or HTTP.sys may hold it) and left alone, with a warning, when
+    # it is not.
+    [switch]$NoHttpRedirect,
     # The account the server runs as, and opens the kiosks' shares as: a gMSA
     # (DOMAIN\name$), a domain account (with -ServiceAccountPassword), or
     # NT AUTHORITY\NETWORK SERVICE.
@@ -256,6 +260,32 @@ if ($CaddyExe) {
 }
 Unblock-File $caddy
 
+# The ports: the site's own, which has to be free, and 80 for the redirect.
+$portFree = {
+    param([int]$Port)
+    $l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, $Port)
+    try { $l.Start(); return $true } catch { return $false } finally { try { $l.Stop() } catch { } }
+}
+$portOwner = {
+    param([int]$Port)
+    $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $c) { return 'something Windows keeps for itself (netsh int ipv4 show excludedportrange tcp)' }
+    if ($c.OwningProcess -eq 4) { return 'HTTP.sys (IIS, WinRM or another web service; netsh http show servicestate)' }
+    $p = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+    return "$($p.ProcessName) (process $($c.OwningProcess))"
+}
+$sitePort = ([uri]$SiteAddress).Port
+if (-not (& $portFree $sitePort)) { throw "port $sitePort, for $SiteAddress, is in use by $(& $portOwner $sitePort). Free it, or give -SiteAddress another port (https://name:8443)." }
+$ports = @($sitePort)
+$noRedirect = $HttpOnly -or $NoHttpRedirect -or $sitePort -eq 80
+if (-not $noRedirect) {
+    if (& $portFree 80) { $ports = @(80) + $ports }
+    else {
+        $noRedirect = $true
+        Write-Warning "port 80 is in use by $(& $portOwner 80), so http:// is not sent on to $SiteAddress; people have to type https://."
+    }
+}
+
 $tls = 'internal'; $crt = $null; $key = $null
 if ($HttpOnly) { $tls = 'off' }
 elseif ($CertificateFile) {
@@ -266,7 +296,7 @@ elseif ($CertificateFile) {
 $caddyfile = Join-Path $DataDir 'caddy\Caddyfile'
 $text = Get-KfwCaddyfile -SiteAddress $SiteAddress -WebDir (Join-Path $InstallDir 'KioskFleetWeb\web') -Storage (Join-Path $DataDir 'caddy') `
     -Tls $tls -CertificateFile $crt -KeyFile $key -Backend "127.0.0.1:$BackendPort" -LogFile (Join-Path $DataDir 'logs\caddy.log') `
-    -ErrorLogFile (Join-Path $DataDir 'logs\caddy-errors.log')
+    -ErrorLogFile (Join-Path $DataDir 'logs\caddy-errors.log') -NoRedirect:$noRedirect
 [IO.File]::WriteAllText($caddyfile, $text)
 $check = & $caddy validate --config $caddyfile --adapter caddyfile 2>&1
 if ($LASTEXITCODE) { throw "Caddy does not take the Caddyfile:`n$($check -join "`n")" }
@@ -298,8 +328,8 @@ Say "service $CaddyService, as NETWORK SERVICE, started"
 
 Get-NetFirewallRule -Name $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -Name $FirewallRule -DisplayName 'Kiosk Fleet Web (Caddy)' -Direction Inbound -Action Allow -Protocol TCP `
-    -LocalPort 80, 443 -Program $caddy | Out-Null
-Say 'firewall: 80 and 443 open to Caddy'
+    -LocalPort $ports -Program $caddy | Out-Null
+Say "firewall: $($ports -join ' and ') open to Caddy"
 
 # --- is it there? ----------------------------------------------------------------------------------------------
 Step 'Checking'

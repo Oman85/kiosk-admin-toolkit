@@ -135,7 +135,7 @@ function Test-State {
     Assert-Equal 3 ([int]($hosts.MWEB2.Days | Measure-Object -Sum).Sum)
     Assert-Equal 'kiosk@contoso.test' $hosts.PWEB1.Launchers.PBI.Account
     Assert-Equal '72%' $hosts.MWEB1.Launchers.Mach2.Screen
-    Assert-Equal 'Plant1/LINE1' $hosts.MWEB1.Launchers.Mach2.UrlLocation
+    Assert-Equal 'LINE1' $hosts.MWEB1.Launchers.Mach2.UrlLocation
     Assert-That ($hosts.MWEB1.MessageOk -and -not $hosts.MWEB3.MessageOk) 'messages need V7.0 or NG'
     Assert-Equal 'Other' $hosts.OWEB1.Tab
     Assert-Equal $false $d.live.fresh.stale

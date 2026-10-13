@@ -188,9 +188,9 @@ function Get-KfwWebObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes
 }
 
 function Get-KfwUrlLocation([string]$Url) {
-    # Where a Mach2 dashboard URL points: the part after /@/, up to its
+    # Where a Mach2 dashboard URL points: the last folder after /@/ before its
     # Dashboards folder. .../dashboard:viewer/@/Nyrany/LASER020/Dashboards/Graphs
-    # is Nyrany/LASER020. Empty when the URL does not say.
+    # is LASER020. Empty when the URL does not say.
     $u = $null
     if (-not $Url -or -not [Uri]::TryCreate($Url.Trim(), [UriKind]::Absolute, [ref]$u)) { return '' }
     $parts = @($u.AbsolutePath -split '/' | ForEach-Object { [Uri]::UnescapeDataString($_) })
@@ -201,7 +201,8 @@ function Get-KfwUrlLocation([string]$Url) {
         if ($p -eq 'Dashboards') { break }
         if ($p) { $out.Add($p) }
     }
-    return $out -join '/'
+    if (-not $out.Count) { return '' }
+    return $out[$out.Count - 1]
 }
 
 function Get-KfwNgObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes = 5, [string]$HostName = '') {

@@ -147,7 +147,16 @@ function Test-ScanFillsTheDashboard {
     $hosts = @{}; foreach ($k in $v.Kiosks) { $hosts[$k.Host] = $k }
     Assert-That ($v.Ok -and $v.Total -eq 2 -and $v.Attention -eq 0) "total $($v.Total) attention $($v.Attention)"
     Assert-Equal 'SHOWING' $hosts.MWEB1.Launchers.Mach2.State
+    Assert-Equal 'LINE1' $hosts.MWEB1.Launchers.Mach2.UrlLocation 'the location from the dashboard URL'
     Assert-Equal 'PBI' $hosts.PWEB1.Screens[0].Kind
+}
+
+function Test-UrlLocation {
+    Assert-Equal 'LASER020' (Get-KfwUrlLocation 'http://shcz5plc02:302/deltav/dashboard:viewer/@/Nyrany/LASER020/Dashboards/Graphs')
+    Assert-Equal 'LINE 1' (Get-KfwUrlLocation 'http://station:302/x/@/Plant1/LINE%201') 'escaped, and no Dashboards folder'
+    Assert-Equal '' (Get-KfwUrlLocation 'http://station:302/ord/dashboard') 'no /@/'
+    Assert-Equal '' (Get-KfwUrlLocation 'not a url')
+    Assert-Equal '' (Get-KfwUrlLocation '')
 }
 
 function Test-ExcelSavedCsvIsLeftAlone {

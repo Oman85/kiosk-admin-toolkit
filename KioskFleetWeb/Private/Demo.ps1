@@ -26,7 +26,7 @@ function New-KfwDemoKiosks([string]$Root) {
     [IO.File]::WriteAllText((Join-KfwPath ([IO.Path]::GetDirectoryName($ng)) 'Mach2LauncherNG.ps1'), '# fake')
     [IO.File]::WriteAllText((Join-KfwPath $pbi 'PbiLauncher.ps1'), '# fake')
     Write-KfwDemoJson (Join-KfwPath $ng 'MWEB1.json') ([ordered]@{ ConfigVersion = '1.00NG'; LoginURL = 'http://station:302/prelogin?clear=true'
-            DisplayURL = 'http://station:302/ord/dashboard'; UserName = 'operator'; ScreenSelect = '1'; Watchdog = '1'; LogName = 'MWEB1_Mach2LauncherNG.log' })
+            DisplayURL = 'http://station:302/deltav/dashboard:viewer/@/Plant1/LINE1/Dashboards/Main'; UserName = 'operator'; ScreenSelect = '1'; Watchdog = '1'; LogName = 'MWEB1_Mach2LauncherNG.log' })
     Write-KfwDemoJson (Join-KfwPath $ng 'Status\S1.status.json') ([ordered]@{
             Instance = 'S1'; State = 'SHOWING'; LauncherVersion = '1.00NG'; EdgeVersion = 'Edg/153.0'; UpdatedUtc = Format-KfwDemoIso $now
             StateSinceUtc = Format-KfwDemoIso $now.AddMinutes(-55); Watchdog = $true; LoopGuard = 'OFF'; ScreenWhitePercent = 72
@@ -175,7 +175,8 @@ function Write-KfwDemoEvents([string]$CsvPath, [int]$HistoryDays = 0) {
             MWEB1 = [ordered]@{ Installed = $true; OldLauncher = $false; Status = 'OK'; Error = ''; Screens = @('S1'); Instances = @([ordered]@{
                         Instance = 'S1'; Screen = 'S1'; State = 'SHOWING'; HostStatus = 'OK'; UpdatedUtc = $iso; StateMinutes = 55
                         Version = '1.00NG'; Edge = '153.0'; Watchdog = $true; LoopGuard = 'OFF'; PageWhitePercent = 63; ScreenWhitePercent = 72
-                        SignIns = 1; Reloads = 2; BrowserStarts = 1; PcRestarts = 0; LastError = '' })
+                        SignIns = 1; Reloads = 2; BrowserStarts = 1; PcRestarts = 0; LastError = ''
+                        Url = 'http://station:302/deltav/dashboard:viewer/@/Plant1/LINE1/Dashboards/Main' })
             }
         }
     }

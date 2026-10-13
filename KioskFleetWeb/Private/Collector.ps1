@@ -560,7 +560,7 @@ function Invoke-KfwFetchKiosk($F, $Kiosk, $S, [datetime]$Now) {
             # Mach2 Launcher NG, where installed - it is the watchdog as well,
             # so its ledger is read even on a kiosk the list calls Power BI.
             if (Test-KfwDir $folder) {
-                $F.Ng = Get-KfwNgObservation $folder $Now $S.LauncherStaleMinutes
+                $F.Ng = Get-KfwNgObservation $folder $Now $S.LauncherStaleMinutes $h
                 if ($F.Ng.Error) { [void]$F.Notes.Add("Launcher: $($F.Ng.Error)") }
             }
             if ($Kiosk.RunsWatchdog -or ($F.Ng -and $F.Ng.Installed)) {

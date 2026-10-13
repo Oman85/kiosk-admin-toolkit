@@ -135,6 +135,7 @@ function Test-State {
     Assert-Equal 3 ([int]($hosts.MWEB2.Days | Measure-Object -Sum).Sum)
     Assert-Equal 'kiosk@contoso.test' $hosts.PWEB1.Launchers.PBI.Account
     Assert-Equal '72%' $hosts.MWEB1.Launchers.Mach2.Screen
+    Assert-Equal 'LINE1' $hosts.MWEB1.Launchers.Mach2.UrlLocation
     Assert-That ($hosts.MWEB1.MessageOk -and -not $hosts.MWEB3.MessageOk) 'messages need V7.0 or NG'
     Assert-Equal 'Other' $hosts.OWEB1.Tab
     Assert-Equal $false $d.live.fresh.stale
@@ -219,7 +220,7 @@ function Test-ConfigEditor {
     $r, $j = Invoke-TestJob $admin 'MWEB1' 'config-read' @{ kind = 'NG'; instance = 'S1' }
     Assert-That ($j.ok -and -not $j.result.isNew) (ConvertTo-Json $j -Compress -Depth 6)
     $fields = @{}; foreach ($f in $j.result.fields) { $fields[$f.Key] = $f }
-    Assert-That ($fields.DisplayURL.Value -eq 'http://station:302/ord/dashboard' -and -not $fields.DisplayURL.Advanced) 'the URL first'
+    Assert-That ($fields.DisplayURL.Value -eq 'http://station:302/deltav/dashboard:viewer/@/Plant1/LINE1/Dashboards/Main' -and -not $fields.DisplayURL.Advanced) 'the URL first'
 
     $r, $j = Invoke-TestJob $admin 'MWEB1' 'config-write' @{ kind = 'NG'; instance = 'S1'; values = @{ DisplayURL = 'http://station:302/ord/other'; UserName = 'operator'; Sneaky = 'x' } }
     Assert-That $j.ok (ConvertTo-Json $j -Compress -Depth 6)

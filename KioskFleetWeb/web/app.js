@@ -1684,7 +1684,9 @@ function drawKioskList() {
       el('td', null, el('div', { class: 'btnrow' },
         el('button', { class: 'btn small', type: 'button', text: 'Change...', disabled: !editable, onclick: () => kioskRowDialog(r) }),
         el('button', { class: 'btn small', type: 'button', text: r.scanned ? 'Stop scanning' : 'Scan it', disabled: !editable,
-          title: r.scanned ? 'Active = no: kept in the list, shown as INACTIVE, not scanned' : 'Active = yes', onclick: () => setRowActive(r, !r.scanned) })))))))));
+          title: r.scanned ? 'Active = no: kept in the list, shown as INACTIVE, not scanned' : 'Active = yes', onclick: () => setRowActive(r, !r.scanned) }),
+        el('button', { class: 'btn small danger', type: 'button', text: 'Delete...', disabled: !editable,
+          title: 'Remove this kiosk from the list', onclick: () => removeRowDialog(r) })))))))));
 }
 
 async function listChanged(text) {

@@ -130,7 +130,7 @@ All of it comes from `MWST_FleetEvents.csv`, so it reaches back as far as the CS
 
 ## The kiosk list
 
-**Kiosk list** (admins) shows every row of the list, scanned or not, and why not: *inactive* or *not flagged*. **Add a kiosk...**, **Change...** (name, location, type, watchdog, active, restart group, info), **Stop scanning** / **Scan it** (Active = N / Y) and **Remove from the list...** take effect at the next scan. **List entry...** in a kiosk's details opens its row, or a new row filled in from the scan.
+**Kiosk list** (admins) shows every row of the list, scanned or not, and why not: *inactive* or *not flagged*. **Add a kiosk...**, **Change...** (name, location, type, watchdog, active, restart group, info), **Stop scanning** / **Scan it** (Active = N / Y) and **Delete...** (also **Remove from the list...** in Change...) take effect at the next scan. **List entry...** in a kiosk's details opens its row, or a new row filled in from the scan.
 
 The list stays a file. The first change of an uploaded `.xlsx` or `.txt` writes every row of it to `kiosk-list.csv` in the data folder and keeps the original as `kiosk-list-before-edit.xlsx`. The `.csv` can be downloaded, changed in Excel and uploaded again in **Settings**; an upload replaces it as before. Each change is in the audit log (`kiosk-list-add`, `-edit`, `-remove`) with what changed. A list named by `KFW_KIOSK_LIST` is shown but not edited here.
 

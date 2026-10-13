@@ -187,7 +187,24 @@ function Get-KfwWebObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes
     Get-KfwPbiObservation $Docs $Now $StaleMinutes $HostName 'WebLauncher'
 }
 
-function Get-KfwNgObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes = 5) {
+function Get-KfwUrlLocation([string]$Url) {
+    # Where a Mach2 dashboard URL points: the part after /@/, up to its
+    # Dashboards folder. .../dashboard:viewer/@/Nyrany/LASER020/Dashboards/Graphs
+    # is Nyrany/LASER020. Empty when the URL does not say.
+    $u = $null
+    if (-not $Url -or -not [Uri]::TryCreate($Url.Trim(), [UriKind]::Absolute, [ref]$u)) { return '' }
+    $parts = @($u.AbsolutePath -split '/' | ForEach-Object { [Uri]::UnescapeDataString($_) })
+    $at = [Array]::IndexOf($parts, '@')
+    if ($at -lt 0) { return '' }
+    $out = [Collections.Generic.List[string]]::new()
+    foreach ($p in @($parts | Select-Object -Skip ($at + 1))) {
+        if ($p -eq 'Dashboards') { break }
+        if ($p) { $out.Add($p) }
+    }
+    return $out -join '/'
+}
+
+function Get-KfwNgObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes = 5, [string]$HostName = '') {
     # Mach2 Launcher NG, from the kiosk's Public Documents. Never throws.
     $obs = New-KfwEmptyObservation 'MACH2'
     try {
@@ -206,8 +223,9 @@ function Get-KfwNgObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes 
         }
         $files = [Collections.Generic.List[object]]::new()
         foreach ($d in $subdirs) {
-            foreach ($f in (Get-KfwFiles (Join-KfwPath $d.Path 'Status') '*.status.json')) { $files.Add(@($f, $d.Name)) }
+            foreach ($f in (Get-KfwFiles (Join-KfwPath $d.Path 'Status') '*.status.json')) { $files.Add(@($f, $d.Name, $d.Path)) }
         }
+        $urls = @{}
         if (-not $files.Count) {
             $obs.Status = 'LAUNCHER_NOT_RUN'; $obs.Severity = 'WARNING'; $obs.Summary = 'launcher=NG installed, not started'
             return $obs
@@ -217,6 +235,11 @@ function Get-KfwNgObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes 
         foreach ($pair in $files) {
             $f = $pair[0]; $dname = $pair[1]
             $s = Read-KfwJsonFile $f.Path
+            if ($HostName -and -not $urls.ContainsKey($dname)) {
+                # The screen's own config says which dashboard it shows.
+                $c = Read-KfwJsonFile (Join-KfwPath $pair[2] "$HostName.json")
+                $urls[$dname] = if ($c -is [Collections.IDictionary] -and $c['DisplayURL']) { [string]$c['DisplayURL'] } else { '' }
+            }
             if ($s -isnot [Collections.IDictionary]) { continue }
             $updated = ConvertFrom-UtcText $s.UpdatedUtc; $since = ConvertFrom-UtcText $s.StateSinceUtc
             $inst = [ordered]@{
@@ -231,6 +254,7 @@ function Get-KfwNgObservation([string]$Docs, [datetime]$Now, [int]$StaleMinutes 
                 SignIns = $s.SignIns; Reloads = $s.Reloads; BrowserStarts = $s.BrowserStarts
                 PcRestarts = $s.PcRestarts; LastError = [string]$s.LastError
                 PcBootUtc = ConvertFrom-UtcText $s.PcBootUtc; HostStatus = ''; Severity = ''
+                Url = [string]$urls[$dname]
             }
             $inst.HostStatus, $inst.Severity = Get-KfwInstanceStatus $inst $StaleMinutes 15 $false
             $instances.Add($inst)
@@ -284,7 +308,7 @@ function Get-KfwSidecarEntry($Obs) {
                         LastShownUtc = Format-KfwIso $i.LastShownUtc; Version = $i.LauncherVersion; Edge = $i.EdgeVersion
                         Watchdog = $i.Watchdog; LoopGuard = $i.LoopGuard; PageWhitePercent = $i.PageWhitePercent
                         ScreenWhitePercent = $i.ScreenWhitePercent; SignIns = $i.SignIns; Reloads = $i.Reloads
-                        BrowserStarts = $i.BrowserStarts; PcRestarts = $i.PcRestarts; LastError = $i.LastError
+                        BrowserStarts = $i.BrowserStarts; PcRestarts = $i.PcRestarts; LastError = $i.LastError; Url = $i.Url
                     }
                 })
         }

@@ -544,6 +544,7 @@ const COLS = {
   host: { h: 'KIOSK', v: (k) => k.Host, cls: 'host' },
   type: { h: 'TYPE', v: (k) => k.Type },
   location: { h: 'LOCATION', v: (k) => k.Location },
+  urlloc: { h: 'URL LOCATION', v: (k, lv) => lv.UrlLocation, tip: (k, lv) => lv.Url, title: "Where the dashboard URL in the screen's config points" },
   status: { h: 'STATUS', v: (k) => k.Status, sortv: (k) => k.Rank, cell: (k) => pill(k.Status, k.Severity) },
   launcher: { h: 'LAUNCHER', v: (k, lv) => lv.State, sev: (k, lv) => lv.Severity },
   for: { h: 'FOR', v: (k, lv) => lv.For },
@@ -558,7 +559,7 @@ const COLS = {
   days: { h: '7 DAYS', v: (k) => k.Days.join(','), sortv: (k) => k.Days.reduce((a, b) => a + b, 0), cell: (k, lv, max) => spark(k.Days, max) }
 };
 const TAB_COLS = {
-  Mach2: ['host', 'location', 'status', 'launcher', 'screen', 'watchdog', 'log', 'agent', 'uptime', 'reb', 'days'],
+  Mach2: ['host', 'location', 'urlloc', 'status', 'launcher', 'screen', 'watchdog', 'log', 'agent', 'uptime', 'reb', 'days'],
   PBI: ['host', 'location', 'status', 'launcher', 'for', 'account', 'ver', 'uptime'],
   Web: ['host', 'location', 'status', 'launcher', 'for', 'ver', 'uptime'],
   Other: ['host', 'type', 'location', 'status', 'uptime']
@@ -573,7 +574,7 @@ function matchesFilter(k, lv, text) {
   if (!text) return true;
   const t = text.trim().toLowerCase();
   if (!t) return true;
-  return [k.Host, k.Location, k.Status, k.Type, lv.State, lv.Account].some((x) => x && x.toLowerCase().includes(t));
+  return [k.Host, k.Location, k.Status, k.Type, lv.State, lv.Account, lv.UrlLocation].some((x) => x && x.toLowerCase().includes(t));
 }
 
 function renderKiosks(main) {
@@ -652,7 +653,7 @@ function renderKioskTable() {
       cols.map((c) => {
         if (c.cell) return el('td', null, c.cell(k, lv, max));
         const v = c.v(k, lv) || '';
-        return el('td', { class: [c.cls, c.sev ? 'sev-' + c.sev(k, lv) : ''].filter(Boolean).join(' '), text: v, title: v.length > 30 ? v : null });
+        return el('td', { class: [c.cls, c.sev ? 'sev-' + c.sev(k, lv) : ''].filter(Boolean).join(' '), text: v, title: (c.tip && c.tip(k, lv)) || (v.length > 30 ? v : null) });
       }));
     const pick = () => { S.selected = k.Host; renderKioskTable(); renderDetail(); };
     tr.addEventListener('click', pick);

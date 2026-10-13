@@ -100,7 +100,7 @@ function Invoke-KfwLiveRead($Ctx) {
     $docs = Open-KfwShare $Ctx
     $now = [datetime]::UtcNow
     $parts = [Collections.Generic.List[object]]::new()
-    if ($Ctx.Kind -in 'ALL', 'NG') { $parts.Add((Get-KfwNgObservation $docs $now $script:LiveStaleMinutes)) }
+    if ($Ctx.Kind -in 'ALL', 'NG') { $parts.Add((Get-KfwNgObservation $docs $now $script:LiveStaleMinutes $Ctx.Target)) }
     if ($Ctx.Kind -in 'ALL', 'PBI') { $parts.Add((Get-KfwPbiObservation $docs $now $script:LiveStaleMinutes $Ctx.Target)) }
     if ($Ctx.Kind -in 'ALL', 'WEB') { $parts.Add((Get-KfwWebObservation $docs $now $script:LiveStaleMinutes $Ctx.Target)) }
     $installed = [bool]@($parts | Where-Object { $_.Installed }).Count

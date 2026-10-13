@@ -211,7 +211,7 @@ function Get-KfwLauncherView($K, [string]$Tab = '') {
     # What a kiosk's launcher was doing at the last scan. Tab picks the
     # launcher that tab is about; without it, the kiosk's own, then any.
     $out = [ordered]@{ Kind = ''; Known = $false; Installed = $false; Old = $false; State = ''; For = ''; Account = ''
-        Version = ''; Screen = ''; Severity = 'UNKNOWN'; Instances = @(); Status = ''; Error = '' }
+        Version = ''; Screen = ''; Severity = 'UNKNOWN'; Instances = @(); Status = ''; Error = ''; Url = ''; UrlLocation = '' }
     if (-not $K) { return $out }
     $want = if ($Tab) { $script:TabKinds[$Tab] } else { $script:TabKinds[[string]$K.Tab] }
     if ($null -eq $want) { $want = '' }
@@ -250,6 +250,10 @@ function Get-KfwLauncherView($K, [string]$Tab = '') {
         $pct = $first['ScreenWhitePercent']
         if ($null -eq $pct) { $pct = $first['PageWhitePercent'] }
         if ($null -ne $pct -and [string]$pct -ne '') { $out.Screen = "$(Format-KfwJsonNumber $pct)%" }
+        # Each screen's location, from the dashboard URL in its config.
+        $urls = @($out.Instances | ForEach-Object { [string]$_['Url'] } | Where-Object { $_ } | Select-Object -Unique)
+        $out.Url = $urls -join '  '
+        $out.UrlLocation = @($urls | ForEach-Object { Get-KfwUrlLocation $_ } | Where-Object { $_ } | Select-Object -Unique) -join ', '
     }
     $st = [string]$first['State']
     if ($st -cin 'SHOWING', 'BROWSING') { $out.Severity = 'OK' }
@@ -342,6 +346,7 @@ function Get-KfwKioskDetail($K) {
                 if ($null -ne $i['ScreenWhitePercent'] -and [string]$i['ScreenWhitePercent'] -ne '') { $w.Add("screen $(Format-KfwJsonNumber $i['ScreenWhitePercent'])%") }
                 if ($null -ne $i['PageWhitePercent'] -and [string]$i['PageWhitePercent'] -ne '') { $w.Add("page $(Format-KfwJsonNumber $i['PageWhitePercent'])%") }
                 if ($w.Count) { $rows.Add((New-KfwDetailRow 'White' ($w -join ', ') 'DIM')) }
+                if ($i['Url']) { $rows.Add((New-KfwDetailRow 'Shows' $i['Url'] 'DIM' $true)) }
                 if ($i['Watchdog']) { $rows.Add((New-KfwDetailRow 'Watchdog' 'this screen is the watchdog' 'DIM')) }
                 if ($i['LoopGuard'] -and [string]$i['LoopGuard'] -cne 'OFF') { $rows.Add((New-KfwDetailRow 'Loop guard' $i['LoopGuard'] 'CRITICAL')) }
                 if ($i['PcRestarts']) { $rows.Add((New-KfwDetailRow 'PC restarts' $i['PcRestarts'] 'DIM')) }
@@ -389,7 +394,7 @@ function Get-KfwKioskView($K, $DayKeys) {
     foreach ($tab in 'Mach2', 'PBI', 'Web', 'Other') {
         $lv = Get-KfwLauncherView $K $(if ($tab -eq 'Other') { '' } else { $tab })
         $launchers[$tab] = [ordered]@{ Kind = $lv.Kind; Known = $lv.Known; Installed = $lv.Installed; State = $lv.State; For = $lv.For
-            Account = $lv.Account; Version = $lv.Version; Screen = $lv.Screen; Severity = $lv.Severity }
+            Account = $lv.Account; Version = $lv.Version; Screen = $lv.Screen; Severity = $lv.Severity; Url = $lv.Url; UrlLocation = $lv.UrlLocation }
     }
     $screens = @(foreach ($s in @($K.Screens)) {
             $kind = $script:KindOfScreenLauncher[$s.Launcher]

@@ -239,7 +239,7 @@ async function renderLogin(message, known) {
   if (info && info.setup) card.append(el('p', { class: 'hint', text: 'No accounts yet: open the setup link from the server\'s log to make the first admin.' }));
   if (info && info.insecure) card.append(el('p', { class: 'hint sev-WARNING', text: 'This connection is not encrypted: your password crosses the network as typed. Ask for the https:// address.' }));
   card.append(note);
-  loginFrame('Kiosk Fleet', (info && info.site) || 'Every kiosk screen, and what can be done to it.', card);
+  loginFrame('Kiosk Fleet', (info && info.site) || 'CZECH DIVISION - Nyrany', card);
   setTimeout(() => user.focus(), 0);
 }
 

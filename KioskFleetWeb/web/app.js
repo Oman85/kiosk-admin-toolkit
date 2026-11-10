@@ -754,7 +754,7 @@ function renderActions(k, busy) {
   return el('div', { class: 'actions' },
     el('h3', { text: 'KIOSK' }), el('div', { class: 'btnrow' }, kiosk),
     el('h3', { text: 'LAUNCHER' + (target.screen ? ` - ${target.screen} ${NAMES[target.kind]}` : '') }), el('div', { class: 'btnrow' }, launcher),
-    S.me.role === 'operator' ? el('p', { class: 'hint', text: 'Restart, hold, stop, passwords and config are for admins.' }) : null);
+    ['restart', 'hold', 'stop', 'password', 'config'].some((x) => !can(x)) ? el('p', { class: 'hint', text: 'The greyed-out actions are not open to your account. An admin can give them to it on the Users page.' }) : null);
 }
 
 // ---------------------------------------------------------------------------
@@ -901,6 +901,31 @@ function openModal(o) {
         wrap = el('div', { class: 'field' }, el('label', { class: 'lbl', for: id, text: f.label }), control);
         break;
       }
+      case 'perms': {
+        // A tick per permission. f.value: the names ticked; f.role(): the
+        // role chosen now, to mark what differs from it.
+        const boxes = {};
+        const list = el('div', { class: 'perms', id, role: 'group', 'aria-label': f.label });
+        const mark = () => {
+          const role = f.role ? f.role() : '';
+          for (const [name, b] of Object.entries(boxes)) {
+            const own = roleHas(role, name);
+            b.tag.textContent = b.c.checked === own ? '' : (b.c.checked ? 'added' : 'taken away');
+            b.tag.className = 'ptag' + (b.c.checked === own ? '' : (b.c.checked ? ' plus' : ' minus'));
+          }
+        };
+        for (const p of f.catalog || []) {
+          if (!p.adjustable) continue;
+          const c = el('input', { type: 'checkbox', checked: (f.value || []).includes(p.name), onchange: mark });
+          const tag = el('span', { class: 'ptag' });
+          boxes[p.name] = { c, tag };
+          list.append(el('label', { class: 'check perm', title: p.name }, c, el('span', { text: p.label }), tag));
+        }
+        controls[f.key] = { kind: 'perms', boxes, mark };
+        wrap = el('div', { class: 'field' }, el('span', { class: 'lbl', text: f.label }), list);
+        mark();
+        break;
+      }
       case 'textarea': {
         control = el('textarea', { id, rows: 3, maxLength: f.max || 1000 });
         control.value = f.value || '';
@@ -951,10 +976,18 @@ function openModal(o) {
         if (c.kind === 'password') { out[k] = c.p1.value; out[k + '.again'] = c.p2.value; }
         else if (c.kind === 'bool') out[k] = c.c.checked ? '1' : '0';
         else if (c.kind === 'secret') out[k] = c.c.value;
+        else if (c.kind === 'perms') out[k] = Object.keys(c.boxes).filter((n) => c.boxes[n].c.checked);
         else out[k] = c.c.value.trim();
       }
       return out;
     },
+    setPerms(key, names) {
+      const c = controls[key];
+      if (!c || c.kind !== 'perms') return;
+      for (const [n, b] of Object.entries(c.boxes)) b.c.checked = names.includes(n);
+      c.mark();
+    },
+    control(key) { const c = controls[key]; return c ? c.c : null; },
     clearSecrets() { for (const c of Object.values(controls)) { if (c.kind === 'password') { c.p1.value = ''; c.p2.value = ''; } else if (c.kind === 'secret') c.c.value = ''; } },
     setNote(text, sev) { note.textContent = text || ''; note.className = 'note' + (sev ? ' sev-' + sev : ''); },
     log(line) { log.classList.remove('hidden'); log.textContent += line + '\n'; log.scrollTop = log.scrollHeight; if (pTimer) pStep.textContent = line; },
@@ -1935,7 +1968,10 @@ function changePasswordDialog() {
 // Users
 // ---------------------------------------------------------------------------
 async function loadUsers() {
-  try { S.users = (await api('GET', '/api/users')).users; } catch (e) { S.users = []; toast(e.message, 'WARNING'); }
+  try {
+    const r = await api('GET', '/api/users');
+    S.users = r.users; S.perms = r.permissions || []; S.roles = r.roles || ['operator', 'admin'];
+  } catch (e) { S.users = []; toast(e.message, 'WARNING'); }
   if (S.view === 'Users') renderUsers($('#main'), true);
 }
 
@@ -1944,7 +1980,7 @@ function renderUsers(main, force) {
   if ($('#users', main) && !force) return;
   const rows = S.users.map((u) => el('tr', { class: u.disabled ? 'dim' : '' },
     el('td', { class: 'host', text: u.name }),
-    el('td', null, el('span', { class: 'role ' + u.role, text: u.role })),
+    el('td', null, el('span', { class: 'role ' + u.role, text: u.role }), rightsBadges(u)),
     el('td', { class: u.disabled || u.mustChange ? 'sev-WARNING' : 'sev-OK', text: u.disabled ? 'disabled' : (u.mustChange ? 'must change password' : 'active') }),
     el('td', { text: (u.lastLogin || 'never').replace('T', ' ') }),
     el('td', { text: u.sessions ? String(u.sessions) : '' }),
@@ -1952,7 +1988,7 @@ function renderUsers(main, force) {
     el('td', null, el('button', { class: 'btn small', type: 'button', text: 'Change...', onclick: () => userDialog(u) }))));
   setKids(main,
     el('h2', { text: 'Users' }),
-    el('p', { class: 'sub', text: 'Everyone signs in with an account of their own. Operators see everything and can do what cannot break a kiosk; admins can do everything, including this page.' }),
+    el('p', { class: 'sub', text: 'Everyone signs in with an account of their own. Viewers see everything and change nothing; operators can also do what cannot break a kiosk; admins can do everything, including this page. Single permissions can be added to an account, or taken from it, on top of its role.' }),
     el('div', { class: 'toolbar' }, el('button', { class: 'btn small primary', type: 'button', text: 'Add an account...', onclick: addUserDialog }),
       el('button', { class: 'btn small', type: 'button', text: 'Refresh', onclick: loadUsers })),
     el('div', { id: 'users' }, S.users.length ? el('div', { class: 'tablewrap' }, el('table', null,
@@ -1960,16 +1996,60 @@ function renderUsers(main, force) {
       el('tbody', null, rows))) : el('div', { class: 'card empty', text: 'No accounts.' })));
 }
 
-const ROLE_OPTIONS = [{ value: 'operator', text: 'Operator - sees everything; scan, read live, screenshot, reload, message, log' }, { value: 'admin', text: 'Admin - everything' }];
+const ROLE_OPTIONS = [
+  { value: 'viewer', text: 'Viewer - sees everything; changes nothing' },
+  { value: 'operator', text: 'Operator - sees everything; scan, read live, screenshot, reload, message, log' },
+  { value: 'admin', text: 'Admin - everything' }
+];
+
+// Whether a role has a permission by itself, from the catalog the server sends.
+function roleHas(role, name) {
+  const p = (S.perms || []).find((x) => x.name === name);
+  const roles = S.roles || [];
+  return !!p && roles.indexOf(role) >= 0 && roles.indexOf(role) >= roles.indexOf(p.role);
+}
+const roleRights = (role) => (S.perms || []).filter((p) => roleHas(role, p.name)).map((p) => p.name);
+const permLabel = (name) => ((S.perms || []).find((p) => p.name === name) || {}).label || name;
+
+function rightsBadges(u) {
+  const g = u.grant || [], d = u.deny || [];
+  if (!g.length && !d.length) return null;
+  const title = [...g.map((n) => '+ ' + permLabel(n)), ...d.map((n) => '- ' + permLabel(n))].join('\n');
+  return el('span', { class: 'rights', title },
+    g.length ? el('span', { class: 'ptag plus', text: '+' + g.length }) : null,
+    d.length ? el('span', { class: 'ptag minus', text: '-' + d.length }) : null);
+}
+
+// The grant and deny lists for what is ticked, against the role chosen.
+function rightsBody(role, ticked) {
+  const own = roleRights(role);
+  const adjustable = (n) => (S.perms || []).some((p) => p.name === n && p.adjustable);
+  return { grant: ticked.filter((n) => !own.includes(n)), deny: own.filter((n) => adjustable(n) && !ticked.includes(n)) };
+}
+
+// Role and permissions fields that follow each other: a new role ticks what
+// it gives, and keeps what was added to or taken from the account.
+function wireRights(m, u) {
+  const sel = m.control('role');
+  if (!sel) return;
+  sel.addEventListener('change', () => {
+    const g = u ? u.grant || [] : [], d = u ? u.deny || [] : [];
+    const names = [...new Set([...roleRights(sel.value), ...g])].filter((n) => !d.includes(n));
+    m.setPerms('perms', names);
+  });
+}
 
 function addUserDialog() {
-  openModal({
+  let m = null;
+  const roleNow = () => (m && m.control('role') ? m.control('role').value : 'operator');
+  m = openModal({
     title: 'Add an account',
     fields: [
       { key: 'name', label: 'Account name', hint: 'Letters, digits, dots, dashes, underscores or @ - an e-mail address works.', max: 64 },
       { key: 'role', label: 'Role', kind: 'choice', value: 'operator', options: ROLE_OPTIONS },
       { key: 'password', label: 'Password', kind: 'password' },
-      { key: 'mustChange', label: 'At first sign-in', kind: 'bool', value: '1', hint: 'they choose a password of their own' }
+      { key: 'mustChange', label: 'At first sign-in', kind: 'bool', value: '1', hint: 'they choose a password of their own' },
+      { key: 'perms', label: 'May do (the role ticks these; change any one for this account)', kind: 'perms', catalog: S.perms, value: roleRights('operator'), role: roleNow, advanced: true }
     ],
     note: 'Any password will do here. They choose one of their own at first sign-in if that is ticked, and theirs needs at least 12 characters, with three of: lower case, upper case, digits, symbols - or 20 characters or more.',
     okText: 'Add it',
@@ -1977,20 +2057,24 @@ function addUserDialog() {
       if (v.password !== v['password.again']) { m.setNote('The two passwords did not match.', 'CRITICAL'); return true; }
       m.busy(true);
       try {
-        await api('POST', '/api/users', { name: v.name, role: v.role, password: v.password, password2: v['password.again'], mustChange: v.mustChange === '1' });
+        await api('POST', '/api/users', Object.assign({ name: v.name, role: v.role, password: v.password, password2: v['password.again'], mustChange: v.mustChange === '1' }, rightsBody(v.role, v.perms)));
         toast(`${v.name} added.`, 'OK');
         loadUsers();
       } catch (e) { m.busy(false); m.setNote(e.message, 'CRITICAL'); return true; }
     }
   });
+  wireRights(m, null);
 }
 
 function userDialog(u) {
   const self = u.name.toLowerCase() === S.me.user.toLowerCase();
-  const m = openModal({
+  let m = null;
+  const roleNow = () => (m && m.control('role') ? m.control('role').value : u.role);
+  m = openModal({
     title: u.name, sub: `${u.role}${u.disabled ? ', disabled' : ''}. Last sign-in: ${(u.lastLogin || 'never').replace('T', ' ')}.`,
     fields: [
       { key: 'role', label: 'Role', kind: 'choice', value: u.role, options: ROLE_OPTIONS },
+      { key: 'perms', label: 'May do (the role ticks these; change any one for this account)', kind: 'perms', catalog: S.perms, value: u.allowed || roleRights(u.role), role: roleNow },
       { key: 'disabled', label: 'Disabled', kind: 'bool', value: u.disabled ? '1' : '0', hint: 'cannot sign in; signed out at once' },
       { key: 'h1', label: 'NEW PASSWORD (leave empty to keep it; any password will do here)', kind: 'note' },
       { key: 'password', label: 'New password', kind: 'password' },
@@ -2006,6 +2090,9 @@ function userDialog(u) {
     onOk: async (v, mm) => {
       const body = {};
       if (v.role !== u.role) body.role = v.role;
+      const rb = rightsBody(v.role, v.perms);
+      const same = (a, b) => [...a].sort().join(',') === [...b].sort().join(',');
+      if (v.role !== u.role || !same(rb.grant, u.grant || []) || !same(rb.deny, u.deny || [])) Object.assign(body, rb);
       if ((v.disabled === '1') !== u.disabled) body.disabled = v.disabled === '1';
       if (v.password || v['password.again']) {
         if (v.password !== v['password.again']) { mm.setNote('The two passwords did not match.', 'CRITICAL'); return true; }
@@ -2020,6 +2107,7 @@ function userDialog(u) {
       } catch (e) { mm.busy(false); mm.setNote(e.message, 'CRITICAL'); return true; }
     }
   });
+  wireRights(m, u);
   return m;
 }
 

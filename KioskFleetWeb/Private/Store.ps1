@@ -2,7 +2,8 @@
 #
 #   users.json     accounts, laid out like the PowerShell server's
 #                  web-users.json (Name, Role, Algorithm, Iterations, Salt,
-#                  Hash, Disabled, ...). Set-KioskFleetUser.ps1 changes it while
+#                  Hash, Disabled, ...), and Grant and Deny: the permissions
+#                  given to, or taken from, one account on top of its role. Set-KioskFleetUser.ps1 changes it while
 #                  the server runs; the server reads it again when it changes.
 #   sessions.json  signed-in sessions: the SHA-256 of each cookie, never the cookie
 #   audit.jsonl    the audit log, one JSON object per line, append only
@@ -108,6 +109,7 @@ function ConvertTo-KfwUserView($u) {
     if (-not $u) { return $null }
     [ordered]@{
         name = [string]$u.Name; role = [string]$u.Role; disabled = [bool]$u.Disabled; must_change = [bool]$u.MustChange
+        grant = [string[]]@($u.Grant | Where-Object { $_ }); deny = [string[]]@($u.Deny | Where-Object { $_ })
         created = [string]$u.Created; updated = [string]$u.Updated; last_login = [string]$u.LastLogin
         sessions_after = [double]$u.SessionsAfter
     }
@@ -154,8 +156,9 @@ function Set-KfwUserRecord($St, [string]$Name, [scriptblock]$Change) {
     } | Out-Null
 }
 
-function Add-KfwUser($St, [string]$Name, [string]$Role, [string]$Password, [bool]$MustChange = $false) {
+function Add-KfwUser($St, [string]$Name, [string]$Role, [string]$Password, [bool]$MustChange = $false, $Grant = @(), $Deny = @()) {
     $h = New-KfwPasswordHash $Password
+    $rights = Get-KfwRightsChange $Role $Grant $Deny
     Invoke-KfwStoreLocked $St {
         $St.Users = $null
         Sync-KfwUsers $St
@@ -163,13 +166,14 @@ function Add-KfwUser($St, [string]$Name, [string]$Role, [string]$Password, [bool
         $now = Get-KfwNowText
         $St.Users.Add([ordered]@{
             Name = $Name; Role = $Role; Algorithm = $h.Algorithm; Iterations = $h.Iterations; Salt = $h.Salt; Hash = $h.Hash
-            Disabled = $false; MustChange = $MustChange; Created = $now; Updated = $now; LastLogin = ''
+            Disabled = $false; MustChange = $MustChange; Grant = $rights.Grant; Deny = $rights.Deny; Created = $now; Updated = $now; LastLogin = ''
         })
         Save-KfwUsers $St
     } | Out-Null
 }
 
 function Import-KfwUserRecord($St, [string]$Name, [string]$Role, $Record, [bool]$Disabled) {
+    $rights = Get-KfwRightsChange $Role @($Record.Grant | Where-Object { Test-KfwAdjustable $_ }) @($Record.Deny | Where-Object { Test-KfwAdjustable $_ })
     Invoke-KfwStoreLocked $St {
         $St.Users = $null
         Sync-KfwUsers $St
@@ -179,7 +183,7 @@ function Import-KfwUserRecord($St, [string]$Name, [string]$Role, $Record, [bool]
         $St.Users.Add([ordered]@{
             Name = $Name; Role = $Role; Algorithm = [string]$Record.Algorithm; Iterations = [int]$Record.Iterations
             Salt = [string]$Record.Salt; Hash = [string]$Record.Hash; Disabled = $Disabled; MustChange = $false
-            Created = $now; Updated = $now; LastLogin = ''
+            Grant = $rights.Grant; Deny = $rights.Deny; Created = $now; Updated = $now; LastLogin = ''
         })
         Save-KfwUsers $St
     } | Out-Null
@@ -195,6 +199,16 @@ function Set-KfwUserPassword($St, [string]$Name, [string]$Password, [bool]$MustC
 
 function Set-KfwUserRole($St, [string]$Name, [string]$Role) {
     Set-KfwUserRecord $St $Name { param($u) $u.Role = $Role }
+}
+
+function Set-KfwUserRights($St, [string]$Name, $Grant, $Deny) {
+    # The permissions one account has on top of its role, and those taken
+    # from it, kept to what differs from the role it has.
+    Set-KfwUserRecord $St $Name {
+        param($u)
+        $r = Get-KfwRightsChange ([string]$u.Role) $Grant $Deny
+        $u.Grant = $r.Grant; $u.Deny = $r.Deny
+    }
 }
 
 function Set-KfwUserDisabled($St, [string]$Name, [bool]$Disabled) {
@@ -222,7 +236,7 @@ function Test-KfwLogin($St, [string]$Name, [string]$Password) {
         Invoke-KfwBurnTime $Password
         return $null
     }
-    if (-not (Test-KfwPassword $rec $Password) -or $rec.Disabled -or -not $script:RoleRank.ContainsKey([string]$rec.Role)) { return $null }
+    if (-not (Test-KfwPassword $rec $Password) -or $rec.Disabled -or -not $script:RoleRank.Contains([string]$rec.Role)) { return $null }
     $who = [string]$rec.Name
     Set-KfwUserRecord $St $who { param($u) $u.LastLogin = Get-KfwNowText }
     return Get-KfwUser $St $who
@@ -236,7 +250,7 @@ function Import-KfwWebUsers($St, [string]$Path) {
     foreach ($u in @($doc.Users)) {
         if (-not $u) { continue }
         $name = [string]$u.Name; $role = [string]$u.Role
-        if (-not (Test-KfwUserName $name) -or -not $script:RoleRank.ContainsKey($role)) { continue }
+        if (-not (Test-KfwUserName $name) -or -not $script:RoleRank.Contains($role)) { continue }
         if ($u.Algorithm -ne 'PBKDF2-SHA256') { continue }
         Import-KfwUserRecord $St $name $role $u ([bool]$u.Disabled)
         $done.Add($name)
@@ -279,7 +293,7 @@ function New-KfwSession($St, [string]$User, [string]$Ip, [string]$Agent) {
 
 function Get-KfwSession($St, [string]$Token, [int]$IdleMinutes, [int]$SessionHours) {
     # The session and its account, or $null if either has gone. A disabled
-    # or removed account, or a changed role, takes effect at once.
+    # or removed account, or a changed role or permission, takes effect at once.
     if (-not $Token) { return $null }
     $th = Get-KfwTokenHash $Token
     $s = $St.Sessions[$th]
@@ -296,7 +310,8 @@ function Get-KfwSession($St, [string]$Token, [int]$IdleMinutes, [int]$SessionHou
         $s.last_seen = $now
         $St.SessionsDirty = $true
     }
-    return @{ user = $u.name; role = $u.role; csrf = [string]$s.csrf; must_change = $u.must_change; token_hash = $th }
+    return @{ user = $u.name; role = $u.role; csrf = [string]$s.csrf; must_change = $u.must_change; token_hash = $th
+        allowed = Get-KfwRightsOf $u.role $u.grant $u.deny }
 }
 
 function Stop-KfwSession($St, [string]$TokenHash) {

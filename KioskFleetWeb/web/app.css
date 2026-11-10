@@ -205,6 +205,16 @@ a { color: var(--accent); }
 .role { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
 .role.admin { color: var(--crit); background: var(--crit-back); }
 .role.operator { color: var(--unknown); background: var(--unknown-back); }
+.role.viewer { color: var(--ok); background: var(--ok-back); }
+/* What was added to or taken from one account, on top of its role. */
+.rights { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.ptag { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--faint); }
+.ptag.plus { color: var(--ok); background: var(--ok-back); padding: 1px 6px; border-radius: 999px; }
+.ptag.minus { color: var(--crit); background: var(--crit-back); padding: 1px 6px; border-radius: 999px; }
+.perms { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 14px; max-height: 300px; overflow-y: auto;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.perms .perm { font-size: 12.5px; }
+.perms .perm > span:first-of-type { flex: 1; }
 .clock { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 12px; }
 /* While a scan runs its bar takes the clock's place; on a wide screen the
    bar stays one row, the notes giving way rather than the buttons. */

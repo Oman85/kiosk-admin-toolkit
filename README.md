@@ -7,7 +7,7 @@ It is the Kiosk Fleet dashboard and manager as a web app:
 - **The dashboard**: Overview, Mach2, Power BI, Web pages and Other, with everything that needs attention at the top, a week of reboots, and every kiosk's details.
 - **Kiosk actions**: Read live, Screenshot, Reload, Restart browser, Hold / Resume, Stop, Log, Message, the sign-in Password, the kiosk's own Config (including a new screen or a new kiosk), and Restart the PC.
 - **The collector**: *Scan now* and *Auto-scan*. It writes the same `MWST_FleetEvents.csv` and `.status.json` as `Collect-MWSTFleet.ps1`, byte for byte, so the Power BI report keeps working unchanged.
-- **Accounts**: sign-in with accounts of the app itself, with no Windows or AD sign-in. Admins manage the accounts on the page. There are two roles, operator and admin.
+- **Accounts**: sign-in with accounts of the app itself, with no Windows or AD sign-in. Admins manage the accounts on the page. There are three roles, viewer, operator and admin, and single permissions can be added to or taken from any one account on top of its role.
 - **An audit log** of every sign-in, every action on a kiosk, every scan and every account change. It can be searched on the page and downloaded as CSV.
 - **Many kiosks at once**: tick kiosks on a tab, or a whole location, and Read live, Reload, Restart browser or send a Message to all of them. Each kiosk's result shows as it comes in.
 - **Screens**: the newest screenshot of every kiosk screen in a grid, with *Take new screenshots* for all of them, or a retake every few minutes while the page is open.
@@ -85,20 +85,23 @@ Run **one collector**. Once this server scans, turn off the scheduled `Collect-M
 
 ## Who can do what
 
-| | Operator | Admin |
-|---|:-:|:-:|
-| Every view: Overview, Mach2, Power BI, Web pages, Other, History, Activity | ✓ | ✓ |
-| **Scan now** | ✓ | ✓ |
-| **Read live**, **Screenshot**, **Log** | ✓ | ✓ |
-| **Reload**, **Restart browser** | ✓ | ✓ |
-| **Message...** on a Mach2 kiosk | ✓ | ✓ |
-| The same on many kiosks at once (ticked, or a whole location) | ✓ | ✓ |
-| **Restart...** a kiosk, **Hold / Resume**, **Stop** | | ✓ |
-| **Password...**, **Config...**, **Add screen...** | | ✓ |
-| **Auto-scan**, stopping a scan | | ✓ |
-| **Audit log**, **Users**, **Settings**, **Kiosk list** | | ✓ |
+| | Viewer | Operator | Admin |
+|---|:-:|:-:|:-:|
+| Every view: Overview, Mach2, Power BI, Web pages, Other, Screens, History, Activity | ✓ | ✓ | ✓ |
+| **Scan now** | | ✓ | ✓ |
+| **Read live**, **Screenshot**, **Log** | | ✓ | ✓ |
+| **Reload**, **Restart browser** | | ✓ | ✓ |
+| **Message...** on a Mach2 kiosk | | ✓ | ✓ |
+| The same on many kiosks at once (ticked, or a whole location) | | ✓ | ✓ |
+| **Restart...** a kiosk, **Hold / Resume**, **Stop** | | | ✓ |
+| **Password...**, **Config...**, **Add screen...** | | | ✓ |
+| **Auto-scan**, stopping a scan | | | ✓ |
+| **Audit log**, **Settings**, **Kiosk list** | | | ✓ |
+| **Users** | | | ✓ |
 
-The page only shows the buttons a role can use. The server checks the role again on every request, so a hand-made request gets *403* and an audit entry. The table is in `KioskFleetWeb\Private\Auth.ps1`.
+The role is where an account starts. In *Users*, **Change...** on an account ticks what its role gives, one line per permission; tick or untick any of them for that account alone: an operator who may also restart kiosks, a viewer who may reload pages, or an admin who may not touch kiosk configs. The table marks such accounts (*+1*, *-2*), and the audit log says what changed. Every permission in the table above can be changed this way, except two that go with the role only: seeing the fleet (everyone) and **Users** (admins), so there is always an admin who can undo a mistake.
+
+The page only shows the buttons an account can use. The server checks the account's permissions again on every request, so a hand-made request gets *403* and an audit entry. A change takes effect at once, in the sessions people already have. The permissions and the least role that has each are in `KioskFleetWeb\Private\Auth.ps1`, or `Set-KioskFleetUser.ps1 permissions`.
 
 ## Screens
 
@@ -137,7 +140,7 @@ The list stays a file. The first change of an uploaded `.xlsx` or `.txt` writes 
 ## Accounts and sessions
 
 - Passwords are stored as salted PBKDF2-SHA256 hashes. A password someone chooses for themselves (first setup, *Change your password*, the change at first sign-in) needs at least 12 characters and three kinds of character, or at least 20 characters. An admin setting a password in *Users*, or with `Set-KioskFleetUser.ps1`, can set any password; the audit log notes when it is below those rules. Tick "choose their own at first sign-in" and the person then has to pick one that meets them.
-- An admin can add an account with a temporary password ("choose their own at first sign-in"), change a role, disable or remove an account, reset a password, and sign someone out everywhere. A change takes effect at once, on every session. The last admin cannot be removed, disabled or demoted.
+- An admin can add an account with a temporary password ("choose their own at first sign-in"), change a role or single permissions, disable or remove an account, reset a password, and sign someone out everywhere. A change takes effect at once, on every session. The last admin cannot be removed, disabled or demoted.
 - Everyone can change their own password (**Password** at the top). Doing so signs out their other sessions.
 - Five wrong passwords for a name within 15 minutes lock that name for 15 minutes. Twenty wrong passwords from one address lock the address. (The count is kept in memory: a restart of the server clears it.)
 - A session is an `HttpOnly`, `SameSite=Strict` cookie, `Secure` over HTTPS. It lapses after 30 minutes idle (`KFW_IDLE_MINUTES`) and after 10 hours whatever happens (`KFW_SESSION_HOURS`). Every change also needs a CSRF token and the page's own origin.
@@ -148,7 +151,12 @@ From the command line on the server, in PowerShell 7 as an administrator, in `C:
 .\Set-KioskFleetUser.ps1 list
 .\Set-KioskFleetUser.ps1 add alice -Role admin       # asks for the password twice
 .\Set-KioskFleetUser.ps1 passwd alice
-.\Set-KioskFleetUser.ps1 role alice operator
+.\Set-KioskFleetUser.ps1 role alice operator         # viewer, operator, admin
+.\Set-KioskFleetUser.ps1 grant alice restart,hold,resume   # on top of the role
+.\Set-KioskFleetUser.ps1 deny alice message           # taken from the role
+.\Set-KioskFleetUser.ps1 rights alice                 # what alice may do, and why
+.\Set-KioskFleetUser.ps1 reset alice                  # back to what the role gives
+.\Set-KioskFleetUser.ps1 permissions                  # every permission's name
 .\Set-KioskFleetUser.ps1 disable alice                # enable, remove
 ```
 
@@ -190,7 +198,7 @@ The local-time columns of the events CSV follow the server's own time zone.
 
 | | |
 |---|---|
-| `users.json` | Accounts: names, roles and password hashes, laid out like the old `web-users.json`. |
+| `users.json` | Accounts: names, roles, the permissions granted or denied on top of each role, and password hashes, laid out like the old `web-users.json`. |
 | `sessions.json` | Signed-in sessions, by the SHA-256 of their cookie. |
 | `audit.jsonl` | The audit log, one entry per line. |
 | `kfw.env`, `share.cred` | Settings; the share account, if there is one. |

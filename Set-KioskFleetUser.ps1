@@ -8,9 +8,14 @@
     runs; it reads the change at once.
 
       list                              every account
-      add NAME [-Role admin]            asks for the password twice
+      add NAME [-Role viewer|operator|admin]   asks for the password twice
       passwd NAME [-MustChange]
-      role NAME operator|admin
+      role NAME viewer|operator|admin
+      rights NAME                       what the account may do, and why
+      grant NAME PERMISSION[,...]       may do this too, whatever the role
+      deny NAME PERMISSION[,...]        may not do this, whatever the role
+      reset NAME                        back to what the role gives
+      permissions                       every permission, and the least role that has it
       disable NAME | enable NAME | remove NAME
       import web-users.json             accounts from the PowerShell server, hashes and all
 
@@ -18,12 +23,17 @@
 
 .EXAMPLE
     .\Set-KioskFleetUser.ps1 add alice -Role admin
+
+.EXAMPLE
+    .\Set-KioskFleetUser.ps1 grant nightshift restart,hold,resume
+    An operator who may also restart kiosks and hold their launchers.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory, Position = 0)][ValidateSet('list', 'add', 'passwd', 'role', 'disable', 'enable', 'remove', 'import')][string]$Action,
+    [Parameter(Mandatory, Position = 0)][ValidateSet('list', 'add', 'passwd', 'role', 'rights', 'grant', 'deny', 'reset', 'permissions', 'disable', 'enable', 'remove', 'import')][string]$Action,
     [Parameter(Position = 1)][string]$Name,
-    [Parameter(Position = 2)][ValidateSet('operator', 'admin')][string]$Role,
+    # The role (add, role), or the permissions (grant, deny): several with commas.
+    [Parameter(Position = 2)][Alias('Role')][string[]]$Value,
     # They choose their own password at the next sign-in.
     [switch]$MustChange,
     [string]$DataDir
@@ -49,12 +59,31 @@ function Read-NewPassword([string]$For) {
     return $p1
 }
 
+$roles = Get-KfwRoles
+$values = @($Value | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+function Get-RoleArgument {
+    if ($values.Count -ne 1 -or $values[0] -cnotin $roles) { throw "The role is one of: $($roles -join ', ')." }
+    return $values[0]
+}
+function Get-RightsText($u) {
+    $parts = @(@($u.grant | ForEach-Object { "+$_" }) + @($u.deny | ForEach-Object { "-$_" }))
+    if ($parts.Count) { return $parts -join ' ' }
+    return ''
+}
+
+if ($Action -eq 'permissions') {
+    foreach ($p in (Get-KfwPermissionCatalog)) {
+        '{0,-10} {1,-9} {2}{3}' -f $p.name, $p.role, $p.label, $(if ($p.adjustable) { '' } else { ' (goes with the role only)' })
+    }
+    return
+}
 if ($Action -eq 'list') {
     $users = Get-KfwUsers $st
     if (-not $users.Count) { 'No accounts.'; return }
     foreach ($u in $users) {
         $state = if ($u.disabled) { 'disabled' } elseif ($u.must_change) { 'must change password' } else { 'active' }
-        '{0,-32} {1,-9} {2,-22} last sign-in {3}' -f $u.name, $u.role, $state, $(if ($u.last_login) { $u.last_login } else { 'never' })
+        $rights = Get-RightsText $u
+        ('{0,-32} {1,-9} {2,-22} last sign-in {3}' -f $u.name, $u.role, $state, $(if ($u.last_login) { $u.last_login } else { 'never' })) + $(if ($rights) { "  $rights" } else { '' })
     }
     return
 }
@@ -69,7 +98,7 @@ $u = Get-KfwUser $st $Name
 if ($Action -eq 'add') {
     if ($u) { throw "There is an account called $Name already." }
     if (-not (Test-KfwUserName $Name)) { throw 'An account name is 2 to 64 letters, digits, dots, dashes, underscores or @.' }
-    $r = if ($Role) { $Role } else { 'operator' }
+    $r = if ($values.Count) { Get-RoleArgument } else { 'operator' }
     Add-KfwUser $st $Name $r (Read-NewPassword $Name) ([bool]$MustChange)
     Write-KfwAudit $st -Action 'user-add' -Target $Name -Result 'ok' -Detail "$r, from the command line"
     "Added $Name ($r)."
@@ -85,10 +114,36 @@ switch ($Action) {
         $detail = 'new password'
     }
     'role' {
-        if (-not $Role) { throw 'The role is operator or admin.' }
-        if ($lastAdmin -and $Role -ne 'admin') { throw 'That is the last admin.' }
-        Set-KfwUserRole $st $Name $Role
-        $detail = "role=$Role"
+        $r = Get-RoleArgument
+        if ($lastAdmin -and $r -ne 'admin') { throw 'That is the last admin.' }
+        Set-KfwUserRole $st $Name $r
+        $detail = "role=$r"
+    }
+    'rights' {
+        $allowed = Get-KfwRightsOf $u.role $u.grant $u.deny
+        "$Name ($($u.role)$(if ($r = Get-RightsText $u) { ", $r" }))"
+        foreach ($p in (Get-KfwPermissionCatalog)) {
+            $why = if ($u.grant -ccontains $p.name) { 'granted' } elseif ($u.deny -ccontains $p.name) { 'denied' } else { 'role' }
+            '  {0} {1,-10} {2,-8} {3}' -f $(if ($allowed -ccontains $p.name) { 'yes' } else { ' no' }), $p.name, $why, $p.label
+        }
+        return
+    }
+    { $_ -in 'grant', 'deny' } {
+        if (-not $values.Count) { throw "Which permissions? Set-KioskFleetUser.ps1 permissions lists them." }
+        $bad = Get-KfwBadPermission $values
+        if ($null -ne $bad) { throw "$bad is not a permission that can be given or taken one by one. Set-KioskFleetUser.ps1 permissions lists them." }
+        # Granting takes a permission out of the account's deny list, and
+        # denying one takes it out of its grants: the last word counts.
+        $grant = @($u.grant); $deny = @($u.deny)
+        if ($Action -eq 'grant') { $grant = @($grant) + $values; $deny = @($deny | Where-Object { $values -cnotcontains $_ }) }
+        else { $deny = @($deny) + $values; $grant = @($grant | Where-Object { $values -cnotcontains $_ }) }
+        Set-KfwUserRights $st $Name $grant $deny
+        $now = Get-KfwUser $st $Name
+        $detail = 'permissions: ' + $(if ($r = Get-RightsText $now) { $r } else { 'as the role' })
+    }
+    'reset' {
+        Set-KfwUserRights $st $Name @() @()
+        $detail = 'permissions: as the role'
     }
     { $_ -in 'disable', 'enable' } {
         if ($Action -eq 'disable' -and $lastAdmin) { throw 'That is the last admin.' }

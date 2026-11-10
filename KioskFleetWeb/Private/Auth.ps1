@@ -1,5 +1,6 @@
 # Who may use the app, and what they may do.
 #
+#   viewer    sees everything, and changes nothing
 #   operator  sees everything, and can do what cannot break a kiosk: scan now,
 #             read live, screenshot, reload, restart the browser, a message on
 #             the screen, the launcher log
@@ -7,35 +8,116 @@
 #             password, the kiosk config, auto-scan, stopping a run, the audit
 #             log, users, settings and editing the kiosk list
 #
+# The role is where an account starts. On top of it, an account can be given
+# single permissions its role does not have (Grant), or have single ones of
+# its role taken away (Deny): an operator who may also restart kiosks, say,
+# or an admin who may not touch the kiosk configs. Seeing the fleet and
+# managing the accounts go with the role only: everyone sees, and only
+# admins manage accounts, so there is always an admin to undo a mistake.
+#
 # Passwords are kept as a salted PBKDF2-SHA256 hash, never the password - the
 # same format as the PowerShell server's Config\web-users.json, which can be
 # imported as it is.
 
-$script:RoleRank = @{ operator = 1; admin = 2 }
+$script:RoleRank = [ordered]@{ viewer = 0; operator = 1; admin = 2 }
 
-# The least role each thing needs. Anything not listed needs admin.
+# The least role each thing needs, and what the Users page calls it.
 $script:Permissions = [ordered]@{
-    view = 'operator'; scan = 'operator'; live = 'operator'; snapshot = 'operator'
-    reload = 'operator'; relaunch = 'operator'; message = 'operator'; log = 'operator'
-    restart = 'admin'; hold = 'admin'; resume = 'admin'; stop = 'admin'; password = 'admin'
-    config = 'admin'; autoscan = 'admin'; stoprun = 'admin'; audit = 'admin'
-    users = 'admin'; settings = 'admin'; kiosklist = 'admin'
+    view     = @{ role = 'viewer'; label = 'See the fleet, screens and history' }
+    scan     = @{ role = 'operator'; label = 'Scan now' }
+    live     = @{ role = 'operator'; label = 'Read live' }
+    snapshot = @{ role = 'operator'; label = 'Take screenshots' }
+    reload   = @{ role = 'operator'; label = 'Reload the page' }
+    relaunch = @{ role = 'operator'; label = 'Restart the browser' }
+    message  = @{ role = 'operator'; label = 'Put a message on the screen' }
+    log      = @{ role = 'operator'; label = 'Read the launcher log' }
+    restart  = @{ role = 'admin'; label = 'Restart the PC' }
+    hold     = @{ role = 'admin'; label = 'Hold the launcher' }
+    resume   = @{ role = 'admin'; label = 'Resume the launcher' }
+    stop     = @{ role = 'admin'; label = 'Stop the launcher' }
+    password = @{ role = 'admin'; label = 'Set the sign-in password' }
+    config   = @{ role = 'admin'; label = 'Read and write the kiosk config, add screens' }
+    autoscan = @{ role = 'admin'; label = 'Turn auto-scan on or off' }
+    stoprun  = @{ role = 'admin'; label = 'Stop a running scan' }
+    audit    = @{ role = 'admin'; label = 'Read the audit log' }
+    settings = @{ role = 'admin'; label = 'Settings: upload the kiosk list, test a kiosk' }
+    kiosklist = @{ role = 'admin'; label = 'Edit the kiosk list' }
+    users    = @{ role = 'admin'; label = 'Manage the accounts' }
 }
 
-$script:HashIterations = 210000
+# These go with the role, and are never granted or denied one by one.
+$script:RoleOnlyPermissions = @('view', 'users')
 
-function Test-KfwAllowed([string]$Role, [string]$Action) {
-    if (-not $Role -or -not $script:RoleRank.ContainsKey($Role)) { return $false }
-    $need = if ($script:Permissions.Contains($Action)) { $script:Permissions[$Action] } else { 'admin' }
-    return $script:RoleRank[$Role] -ge $script:RoleRank[$need]
+function Get-KfwRoles {
+    # The roles, least first.
+    return , [string[]]@($script:RoleRank.Keys)
 }
 
-function Get-KfwAllowedActions([string]$Role) {
+function Test-KfwRoleHas([string]$Role, [string]$Permission) {
+    # Whether a role, by itself, has a permission. Anything unknown: no.
+    if (-not $Role -or -not $script:RoleRank.Contains($Role) -or -not $script:Permissions.Contains($Permission)) { return $false }
+    return $script:RoleRank[$Role] -ge $script:RoleRank[$script:Permissions[$Permission].role]
+}
+
+function Test-KfwAdjustable([string]$Permission) {
+    # Whether a permission can be granted or denied to one account.
+    return $script:Permissions.Contains($Permission) -and $Permission -cnotin $script:RoleOnlyPermissions
+}
+
+function Get-KfwBadPermission($Names) {
+    # The first name in a list that cannot be granted or denied, or $null.
+    foreach ($n in @($Names)) { if (-not (Test-KfwAdjustable ([string]$n))) { return [string]$n } }
+    return $null
+}
+
+function Get-KfwRightsOf([string]$Role, $Grant, $Deny) {
+    # What an account may do: its role's permissions, plus what it was
+    # granted, less what it was denied. Sorted; empty for an unknown role.
     $out = [Collections.Generic.List[string]]::new()
-    foreach ($a in $script:Permissions.Keys) { if (Test-KfwAllowed $Role $a) { $out.Add($a) } }
+    if (-not $Role -or -not $script:RoleRank.Contains($Role)) { return , $out.ToArray() }
+    $g = @($Grant | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    $d = @($Deny | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    foreach ($p in $script:Permissions.Keys) {
+        $has = Test-KfwRoleHas $Role $p
+        if (Test-KfwAdjustable $p) {
+            if ($g -ccontains $p) { $has = $true }
+            if ($d -ccontains $p) { $has = $false }
+        }
+        if ($has) { $out.Add($p) }
+    }
     $out.Sort([StringComparer]::Ordinal)
     return , $out.ToArray()
 }
+
+function Get-KfwRightsChange([string]$Role, $Grant, $Deny) {
+    # A grant and deny list kept to what differs from the role: no grant of
+    # what the role has anyway, no deny of what it does not have. Sorted.
+    $g = [Collections.Generic.List[string]]::new(); $d = [Collections.Generic.List[string]]::new()
+    foreach ($p in @($Grant | Where-Object { $_ } | ForEach-Object { [string]$_ } | Sort-Object -Unique -CaseSensitive)) {
+        if ((Test-KfwAdjustable $p) -and -not (Test-KfwRoleHas $Role $p) -and @($Deny) -cnotcontains $p) { $g.Add($p) }
+    }
+    foreach ($p in @($Deny | Where-Object { $_ } | ForEach-Object { [string]$_ } | Sort-Object -Unique -CaseSensitive)) {
+        if ((Test-KfwAdjustable $p) -and (Test-KfwRoleHas $Role $p)) { $d.Add($p) }
+    }
+    $g.Sort([StringComparer]::Ordinal); $d.Sort([StringComparer]::Ordinal)
+    return @{ Grant = $g.ToArray(); Deny = $d.ToArray() }
+}
+
+function Test-KfwAllowed($Session, [string]$Action) {
+    # Whether a signed-in session may do something. Anything not listed: no.
+    if (-not $Session -or -not $Session.allowed) { return $false }
+    return @($Session.allowed) -ccontains $Action
+}
+
+function Get-KfwPermissionCatalog {
+    # Every permission, for the Users page: its name, what it is, the least
+    # role that has it, and whether it can be granted or denied one by one.
+    foreach ($p in $script:Permissions.Keys) {
+        [ordered]@{ name = $p; label = $script:Permissions[$p].label; role = $script:Permissions[$p].role; adjustable = Test-KfwAdjustable $p }
+    }
+}
+
+$script:HashIterations = 210000
 
 function New-KfwToken([int]$Bytes = 32) {
     # URL-safe base64, as Python's secrets.token_urlsafe.

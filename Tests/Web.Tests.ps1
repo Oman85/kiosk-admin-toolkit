@@ -121,6 +121,83 @@ function Test-OperatorCanDoSafeThings {
     Assert-That ($r.Status -eq 202 -and $j.ok) "reload: $($r.Text) $(ConvertTo-Json $j -Compress)"
 }
 
+function Test-ViewerChangesNothing {
+    $srv = Start-TestFleet
+    $admin = New-TestAdmin $srv
+    Assert-Equal 200 (Send-Test $admin '/api/users' @{ name = 'lookonly'; role = 'viewer'; password = 'Look-Only-2026!'; password2 = 'Look-Only-2026!' }).Status
+    $v = New-TestClient $srv
+    Assert-Equal 200 (Connect-Test $v 'lookonly' 'Look-Only-2026!').Status
+    $me = (Get-Test $v '/api/me').Json
+    Assert-That ($me.role -eq 'viewer' -and (@($me.allowed) -join ',') -eq 'view') "the viewer role: $(@($me.allowed) -join ',')"
+    Assert-Equal 200 (Get-Test $v '/api/state').Status 'a viewer sees the fleet'
+    foreach ($action in 'live', 'reload', 'snapshot', 'restart') { Assert-Equal 403 (Send-Test $v "/api/kiosks/MWEB1/$action" @{}).Status $action }
+    Assert-Equal 403 (Send-Test $v '/api/scan' @{}).Status 'scan'
+}
+
+function Test-PermissionsForOneAccount {
+    # On top of the role: an operator who may also restart kiosks, but may
+    # not reload them.
+    $srv = Start-TestFleet
+    $admin = New-TestAdmin $srv; $op = New-TestOperator $srv
+    Assert-Equal 400 (Send-Test $admin '/api/users/webop' @{ grant = @('users') }).Status 'managing accounts goes with the admin role only'
+    Assert-Equal 400 (Send-Test $admin '/api/users/webop' @{ deny = @('view') }).Status 'seeing goes with every role'
+    Assert-Equal 400 (Send-Test $admin '/api/users/webop' @{ grant = @('deploy') }).Status 'no such permission'
+    Assert-Equal 400 (Send-Test $admin '/api/users/webop' @{ grant = 'restart' }).Status 'a list, not a name'
+    # What the role has anyway is not kept as a grant, nor a deny of what it lacks.
+    $r = Send-Test $admin '/api/users/webop' @{ grant = @('restart', 'live'); deny = @('reload', 'audit') }
+    Assert-That ($r.Status -eq 200 -and (@($r.Json.changed) -join ' ').Contains('+restart -reload')) $r.Text
+    $u = @((Get-Test $admin '/api/users').Json.users | Where-Object { $_.name -eq 'webop' })[0]
+    Assert-Equal 'restart' (@($u.grant) -join ',')
+    Assert-Equal 'reload' (@($u.deny) -join ',')
+    Assert-That ($u.allowed -is [array] -and $u.allowed -contains 'restart' -and $u.allowed -notcontains 'reload') "allowed, as the page reads it: $(ConvertTo-Json $u.allowed -Compress)"
+    Assert-That ((Get-Test $admin '/api/users').Json.roles[0] -eq 'viewer') 'the roles, least first'
+    # It takes effect at once, in the session the operator already has.
+    $me = (Get-Test $op '/api/me').Json
+    Assert-That (@($me.allowed) -contains 'restart' -and @($me.allowed) -notcontains 'reload' -and $me.role -eq 'operator') (@($me.allowed) -join ',')
+    Assert-Equal 403 (Send-Test $op '/api/kiosks/MWEB1/reload' @{}).Status 'reload is taken away'
+    Assert-Equal 403 (Send-Test $op '/api/kiosks/MWEB1/hold' @{}).Status 'hold is still for admins'
+    Assert-Equal 403 (Send-Test $op '/api/group/reload' @{ hosts = @('MWEB1') }).Status 'nor for many kiosks at once'
+    $r, $j = Invoke-TestJob $op 'MWEB1' 'live'
+    Assert-Equal 202 $r.Status 'what the role gives stays'
+    $refused = @(Get-TestAudit $admin 'refused' | Where-Object { $_.User -eq 'webop' -and $_.Action -eq 'reload' })
+    Assert-That $refused.Count 'the refusal is in the audit log'
+    Assert-That (@(Get-TestAudit $admin 'permissions' | Where-Object { $_.Action -eq 'user-change' -and $_.Target -eq 'webop' }).Count) 'the change is in the audit log'
+    # Back to the role.
+    Assert-Equal 200 (Send-Test $admin '/api/users/webop' @{ grant = @(); deny = @() }).Status
+    Assert-That (@((Get-Test $op '/api/me').Json.allowed) -contains 'reload') 'reload is back'
+    # A new account can start with its own, too.
+    Assert-Equal 200 (Send-Test $admin '/api/users' @{ name = 'shiftlead'; role = 'viewer'; grant = @('reload'); password = 'Shift-Lead-2026!'; password2 = 'Shift-Lead-2026!' }).Status
+    $c = New-TestClient $srv
+    Assert-Equal 200 (Connect-Test $c 'shiftlead' 'Shift-Lead-2026!').Status
+    Assert-Equal 'reload,view' (@((Get-Test $c '/api/me').Json.allowed) -join ',')
+}
+
+function Test-PermissionsFromTheCommandLine {
+    $srv = Start-TestFleet
+    $op = New-TestOperator $srv
+    $cli = { param([string[]]$a)
+        $env:KFW_SETTINGS_JSON = $null
+        & (Get-KfwPwshPath) -NoProfile -File (Join-Path $script:Repo 'Set-KioskFleetUser.ps1') @a -DataDir $srv.Work.Data 2>&1
+    }
+    $out = & $cli @('grant', 'webop', 'restart,hold')
+    Assert-That (($out -join ' ').Contains('+hold +restart')) ($out -join ' ')
+    $out = & $cli @('deny', 'webop', 'hold,message')
+    Assert-That (($out -join ' ').Contains('+restart -message')) ($out -join ' ')
+    $me = (Get-Test $op '/api/me').Json
+    Assert-That (@($me.allowed) -contains 'restart' -and @($me.allowed) -notcontains 'hold' -and @($me.allowed) -notcontains 'message') (@($me.allowed) -join ',')
+    $out = & $cli @('grant', 'webop', 'users')
+    Assert-That (($out -join ' ').Contains('not a permission that can be given')) ($out -join ' ')
+    $listed = & $cli @('list')
+    Assert-That (($listed -join "`n") -match 'webop\s+operator.*\+restart -message') ($listed -join ' | ')
+    $rights = & $cli @('rights', 'webop')
+    Assert-That (($rights -join "`n") -match 'yes restart\s+granted') ($rights -join ' | ')
+    $out = & $cli @('role', 'webop', 'viewer')
+    Assert-Equal 'viewer' (Get-Test $op '/api/me').Json.role
+    Assert-That (@((Get-Test $op '/api/me').Json.allowed) -contains 'restart') 'a grant outlasts a change of role'
+    [void](& $cli @('reset', 'webop'))
+    Assert-Equal 'view' (@((Get-Test $op '/api/me').Json.allowed) -join ',')
+}
+
 # --- the fleet ----------------------------------------------------------------------------------
 function Test-State {
     $srv = Start-TestFleet

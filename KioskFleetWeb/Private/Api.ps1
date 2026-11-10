@@ -3,7 +3,8 @@
 # Everyone signs in with an account of this app (no Windows / AD sign-in).
 # A session is an HttpOnly, SameSite=Strict cookie, Secure over HTTPS; every
 # change also needs the session's CSRF token in X-Fleet-Csrf and, from a
-# browser, the page's own origin. Roles are checked here on every request, so
+# browser, the page's own origin. Each account's permissions (its role, and
+# what was granted to or taken from it) are checked here on every request, so
 # a hand-made request gets 403 and an audit entry, not an action.
 
 $script:Cookie = 'kfw_session'
@@ -85,15 +86,15 @@ function Assert-KfwSession($Req) {
 }
 
 function Assert-KfwAllowed($Req, $Session, [string]$Perm, [string]$Action = '', [string]$Target = '') {
-    if (-not (Test-KfwAllowed $Session.role $Perm)) {
-        Write-KfwAudit $script:St -User $Session.user -Role $Session.role -Ip (Get-KfwClientIp $Req) -Action ($(if ($Action) { $Action } else { $Perm })) -Target $Target -Result 'refused' -Detail 'not allowed for this role'
-        Stop-KfwRequest 403 'Your role cannot do that.'
+    if (-not (Test-KfwAllowed $Session $Perm)) {
+        Write-KfwAudit $script:St -User $Session.user -Role $Session.role -Ip (Get-KfwClientIp $Req) -Action ($(if ($Action) { $Action } else { $Perm })) -Target $Target -Result 'refused' -Detail "not allowed for this account ($Perm)"
+        Stop-KfwRequest 403 'Your account cannot do that.'
     }
 }
 
 function Get-KfwMe($Session, $Req) {
     $allowed = [string[]]::new(0)
-    if ($Session) { $allowed = Get-KfwAllowedActions $Session.role }
+    if ($Session) { $allowed = [string[]]@($Session.allowed) }
     [ordered]@{
         user = if ($Session) { $Session.user } else { $null }
         role = if ($Session) { $Session.role } else { $null }
@@ -577,7 +578,7 @@ function Invoke-KfwGroupAction($Req, [string]$Action) {
 function Get-KfwJobResponse($Req, [string]$Id) {
     $s = Assert-KfwSession $Req
     $job = if ($Id -cmatch '^[A-Za-z0-9_-]{10,40}$') { $script:App.Jobs[$Id] } else { $null }
-    if (-not $job -or (-not [string]::Equals($job.user, $s.user, [StringComparison]::OrdinalIgnoreCase) -and $s.role -ne 'admin')) {
+    if (-not $job -or (-not [string]::Equals($job.user, $s.user, [StringComparison]::OrdinalIgnoreCase) -and -not (Test-KfwAllowed $s 'users'))) {
         Stop-KfwRequest 404 'no such job'
     }
     return New-KfwJsonResponse (ConvertTo-KfwJobView $job)
@@ -605,9 +606,10 @@ function Get-KfwUsersResponse($Req) {
     $sessions = Get-KfwActiveSessions $script:St
     $out = foreach ($u in (Get-KfwUsers $script:St)) {
         [ordered]@{ name = $u.name; role = $u.role; disabled = $u.disabled; mustChange = $u.must_change; created = $u.created
-            lastLogin = [string]$u.last_login; sessions = [int]$sessions[$u.name.ToLowerInvariant()] }
+            lastLogin = [string]$u.last_login; sessions = [int]$sessions[$u.name.ToLowerInvariant()]
+            grant = @($u.grant); deny = @($u.deny); allowed = (Get-KfwRightsOf $u.role $u.grant $u.deny) }
     }
-    return New-KfwJsonResponse ([ordered]@{ users = @($out) })
+    return New-KfwJsonResponse ([ordered]@{ users = @($out); roles = (Get-KfwRoles); permissions = @(Get-KfwPermissionCatalog) })
 }
 
 function Test-KfwNewPassword([string]$P1, [string]$P2, [string]$Name) {
@@ -621,17 +623,44 @@ function Test-KfwNewPassword([string]$P1, [string]$P2, [string]$Name) {
     return ''
 }
 
+function Get-KfwRoleFrom($Body) {
+    $role = Get-KfwText $Body 'role' 10
+    if ($role -cnotin (Get-KfwRoles)) { Stop-KfwRequest 400 "The role is one of: $((Get-KfwRoles) -join ', ')." }
+    return $role
+}
+
+function Get-KfwPermissionsFrom($Body, [string]$Name) {
+    # A list of permission names sent as grant or deny: [] when not sent.
+    $v = $Body[$Name]
+    if ($null -eq $v) { return , [string[]]@() }
+    if ($v -is [string] -or $v -is [Collections.IDictionary] -or $v -isnot [Collections.IEnumerable]) { Stop-KfwRequest 400 "$Name is a list of permissions." }
+    $list = @($v | ForEach-Object { [string]$_ })
+    if ($list.Count -gt 50) { Stop-KfwRequest 400 "$Name is too long" }
+    $bad = Get-KfwBadPermission $list
+    if ($null -ne $bad) { Stop-KfwRequest 400 "$bad is not a permission that can be given or taken one by one." }
+    return , [string[]]$list
+}
+
+function Get-KfwRightsText($Grant, $Deny) {
+    $parts = @()
+    if (@($Grant).Count) { $parts += '+' + (@($Grant) -join ' +') }
+    if (@($Deny).Count) { $parts += '-' + (@($Deny) -join ' -') }
+    if ($parts.Count) { return $parts -join ' ' }
+    return 'as the role'
+}
+
 function Add-KfwUserFromPage($Req) {
     $s = Assert-KfwSession $Req
     Assert-KfwAllowed $Req $s 'users' 'user-add'
     $b = Read-KfwJsonBody $Req
-    $name = (Get-KfwText $b 'name' 64).Trim(); $role = Get-KfwText $b 'role' 10
+    $name = (Get-KfwText $b 'name' 64).Trim(); $role = Get-KfwRoleFrom $b
     if (-not (Test-KfwUserName $name)) { Stop-KfwRequest 400 'An account name is 2 to 64 letters, digits, dots, dashes, underscores or @.' }
-    if (-not $script:RoleRank.ContainsKey($role) -or $role -cnotin 'operator', 'admin') { Stop-KfwRequest 400 'The role is operator or admin.' }
+    $rights = Get-KfwRightsChange $role (Get-KfwPermissionsFrom $b 'grant') (Get-KfwPermissionsFrom $b 'deny')
     if (Get-KfwUser $script:St $name) { Stop-KfwRequest 409 "There is an account called $name already." }
     $weak = Test-KfwNewPassword (Get-KfwText $b 'password' 256) (Get-KfwText $b 'password2' 256) $name
-    Add-KfwUser $script:St $name $role (Get-KfwText $b 'password' 256) (Get-KfwFlag $b 'mustChange')
-    Write-KfwAudit $script:St -User $s.user -Role $s.role -Ip (Get-KfwClientIp $Req) -Action 'user-add' -Target $name -Result 'ok' -Detail ($role + $weak)
+    Add-KfwUser $script:St $name $role (Get-KfwText $b 'password' 256) (Get-KfwFlag $b 'mustChange') $rights.Grant $rights.Deny
+    $what = $role + $(if ($rights.Grant.Count -or $rights.Deny.Count) { ', ' + (Get-KfwRightsText $rights.Grant $rights.Deny) } else { '' })
+    Write-KfwAudit $script:St -User $s.user -Role $s.role -Ip (Get-KfwClientIp $Req) -Action 'user-add' -Target $name -Result 'ok' -Detail ($what + $weak)
     return New-KfwJsonResponse @{ ok = $true }
 }
 
@@ -645,13 +674,23 @@ function Set-KfwUserFromPage($Req, [string]$Name) {
     $changes = [Collections.Generic.List[string]]::new()
     $lastAdmin = $u.role -eq 'admin' -and -not $u.disabled -and (Get-KfwUserCount $script:St -ActiveAdminsOnly) -le 1
     $self = [string]::Equals($Name, $s.user, [StringComparison]::OrdinalIgnoreCase)
+    $role = $u.role
     if ($b.Contains('role')) {
-        $role = Get-KfwText $b 'role' 10
-        if ($role -cnotin 'operator', 'admin') { Stop-KfwRequest 400 'The role is operator or admin.' }
-        if ($role -ne $u.role) {
-            if ($lastAdmin) { Stop-KfwRequest 409 'That is the last admin. Make another admin first.' }
-            Set-KfwUserRole $script:St $Name $role
-            $changes.Add("role=$role")
+        $role = Get-KfwRoleFrom $b
+        if ($role -cne $u.role -and $lastAdmin) { Stop-KfwRequest 409 'That is the last admin. Make another admin first.' }
+    }
+    $grant = if ($b.Contains('grant')) { Get-KfwPermissionsFrom $b 'grant' } else { $u.grant }
+    $deny = if ($b.Contains('deny')) { Get-KfwPermissionsFrom $b 'deny' } else { $u.deny }
+    if ($role -cne $u.role) {
+        Set-KfwUserRole $script:St $Name $role
+        $changes.Add("role=$role")
+    }
+    if ($b.Contains('grant') -or $b.Contains('deny')) {
+        $before = Get-KfwRightsChange $role $u.grant $u.deny
+        $after = Get-KfwRightsChange $role $grant $deny
+        if (($before.Grant -join ',') -cne ($after.Grant -join ',') -or ($before.Deny -join ',') -cne ($after.Deny -join ',')) {
+            Set-KfwUserRights $script:St $Name $after.Grant $after.Deny
+            $changes.Add('permissions: ' + (Get-KfwRightsText $after.Grant $after.Deny))
         }
     }
     if ($b.Contains('disabled')) {

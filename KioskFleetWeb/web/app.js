@@ -67,61 +67,10 @@ const can = (what) => !!(S.me && S.me.allowed && S.me.allowed.includes(what));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const plural = (n, one, many) => (n === 1 ? one : many);
 const spinner = (cls) => el('span', { class: 'spinner' + (cls ? ' ' + cls : ''), 'aria-hidden': 'true' });
-// The logo's iris as text: cols x rows characters (one is about twice as
-// tall as wide), turned by `turn` radians, its opening from 0 to 1. Its
-// blades are bounded by lines tangent to the opening, so each boundary
-// turns with the distance; each blade is shaded from its edge across.
-// (tools/make_logo.py draws the same iris in pixels.)
-const IRIS_RAMP = '@@%%##**++=';
-function irisText(cols, rows, turn, open) {
-  const N = 6, hole = 0.18 + 0.4 * open, sector = (2 * Math.PI) / N;
-  const lines = [];
-  for (let r = 0; r < rows; r++) {
-    let line = '';
-    for (let c = 0; c < cols; c++) {
-      const x = ((c + 0.5) / cols) * 2 - 1, y = ((r + 0.5) / rows) * 2 - 1;
-      const d = Math.hypot(x, y);
-      if (d > 1 || d < hole) { line += ' '; continue; }
-      const phi = Math.atan2(y, x) + Math.acos(hole / d) - turn;
-      const u = (((phi % sector) + sector) % sector) / sector;
-      const gap = 0.07 / Math.max(d, 0.3);
-      line += u < gap ? ' ' : IRIS_RAMP[Math.min(IRIS_RAMP.length - 1, Math.floor(((u - gap) / (1 - gap)) * IRIS_RAMP.length))];
-    }
-    lines.push(line);
-  }
-  return lines.join('\n');
-}
-
-// An iris on the page; `live` ones turn and breathe, all of them on one
-// timer that stops by itself once none is left on the page.
-const Iris = { timer: null, t: 0, still: false };
-try { Iris.still = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* moves, then */ }
-function irisPre(cols, rows, live, cls) {
-  const pre = el('pre', { class: 'iris' + (cls ? ' ' + cls : ''), 'aria-hidden': 'true', text: irisText(cols, rows, 0.5, 0.5) });
-  pre.dataset.cols = cols; pre.dataset.rows = rows;
-  setIrisLive(pre, live);
-  return pre;
-}
-function setIrisLive(pre, live) {
-  if (live) pre.dataset.live = '1'; else delete pre.dataset.live;
-  if (live && !Iris.timer && !Iris.still) Iris.timer = setInterval(irisTick, 90);
-}
-function irisTick() {
-  const live = document.querySelectorAll('pre.iris[data-live]');
-  if (!live.length) { clearInterval(Iris.timer); Iris.timer = null; return; }
-  Iris.t++;
-  const turn = 0.5 + Iris.t * 0.07, open = 0.45 + 0.35 * Math.sin(Iris.t * 0.05);
-  for (const pre of live) pre.textContent = irisText(+pre.dataset.cols, +pre.dataset.rows, turn, open);
-}
-
-// What a view shows while it waits for its data: the iris turning, what
-// it is waiting for, and grey lines where the content will be.
-function loadingCard(text, attrs) {
-  return el('div', Object.assign({ class: 'card loadingcard', role: 'status' }, attrs || {}),
-    irisPre(22, 13, true, 'mini'),
-    el('div', { class: 'lc-body' },
-      el('div', { class: 'lc-head' }, el('span', { text })),
-      el('div', { class: 'skel', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'))));
+// What a view shows while it waits for its data: a line saying what it
+// is waiting for. (The bar of dots along the top runs meanwhile.)
+function loadingNote(text, attrs) {
+  return el('div', Object.assign({ class: 'waiting', role: 'status', text }, attrs || {}));
 }
 // The thin bar along the top of the page: on while anything the person
 // asked for is under way (a request, or a job on a kiosk being followed).
@@ -209,7 +158,7 @@ function enter() {
 function loginFrame(title, sub, card) {
   const app = $('#app');
   app.className = '';
-  setKids(app, el('div', { class: 'login' }, el('div', { class: 'logo big', 'aria-hidden': 'true' }), el('h1', { class: 'term', text: title }), el('div', { class: 'dim', text: sub }), card));
+  setKids(app, el('div', { class: 'login' }, el('div', { class: 'logo big', 'aria-hidden': 'true' }), el('h1', { text: title }), el('div', { class: 'dim', text: sub }), card));
 }
 
 async function renderLogin(message, known) {
@@ -310,7 +259,7 @@ function boot() {
   const app = $('#app');
   app.className = '';
   setKids(app, 
-    el('div', { class: 'shell' },
+    el('div', { class: 'shell' + (navFolded() ? ' navmin' : ''), id: 'shell' },
       el('header', { class: 'top', id: 'top' }),
       el('div', { class: 'banners', id: 'banners' }),
       el('nav', { class: 'nav', id: 'nav', 'aria-label': 'Views' }),
@@ -362,7 +311,7 @@ function renderTop() {
   else head = el('span', { class: 'headline crit' }, el('span', { class: 'dot' }), `${f.Attention} KIOSK${f.Attention === 1 ? ' NEEDS' : 'S NEED'} ATTENTION`);
 
   const fresh = el('span', { class: 'fresh' + (L.fresh.stale ? ' stale' : ''), text: f && !f.Ok ? f.Error : L.fresh.text });
-  const kids = [el('span', { class: 'brand' }, el('span', { class: 'logo', 'aria-hidden': 'true' }), el('span', { class: 'term', text: 'KIOSK FLEET' })), head, fresh, el('span', { class: 'spacer' })];
+  const kids = [el('span', { class: 'brand' }, el('span', { class: 'logo', 'aria-hidden': 'true' }), el('span', { text: 'Kiosk Fleet' })), head, fresh, el('span', { class: 'spacer' })];
 
   if (L.run && L.run.kind === 'scan') {
     const bar = el('span', { class: 'bar' }, el('i', { style: { width: (L.run.scan ? L.run.scan.pct : 0) + '%' } }));
@@ -406,6 +355,20 @@ function tabKiosks(tab) {
   return S.fleet.Kiosks.filter((k) => k.Tab === tab || (k.Tabs || []).includes(tab));
 }
 
+// The pane folds down to its icons with the three lines at its top, and
+// stays as it was left.
+function navFolded() {
+  try { return localStorage.getItem('kfw.nav') === 'min'; } catch (e) { return false; }
+}
+function foldNav() {
+  const min = !$('#shell').classList.contains('navmin');
+  $('#shell').classList.toggle('navmin', min);
+  try { localStorage.setItem('kfw.nav', min ? 'min' : 'wide'); } catch (e) { /* fine */ }
+  renderNav();
+  const b = $('#nav button');
+  if (b) b.focus();
+}
+
 function renderNav() {
   const nav = $('#nav');
   if (!nav) return;
@@ -413,10 +376,12 @@ function renderNav() {
   const tabs = f && f.Ok ? f.Tabs : {};
   const item = (id, label, badge, cls) => el('button', {
     type: 'button', class: S.view === id ? 'on' : '', 'aria-current': S.view === id ? 'page' : null,
-    'data-icon': id, onclick: () => show(id)
+    'data-icon': id, title: min ? label : null, onclick: () => show(id)
   }, el('span', { class: 'lab', text: label }), badge ? el('span', { class: 'badge' + (cls ? ' ' + cls : ''), text: String(badge) }) : null);
 
-  const kids = [item('Overview', 'Overview')];
+  const min = $('#shell').classList.contains('navmin');
+  const kids = [el('button', { type: 'button', 'data-icon': 'menu', 'aria-label': 'Navigation', 'aria-expanded': String(!min), title: min ? 'Show the names' : 'Icons only', onclick: foldNav })];
+  kids.push(item('Overview', 'Overview'));
   kids.push(item('Mach2', 'Mach2', tabs.Mach2 && tabs.Mach2.Attention));
   kids.push(item('PBI', 'Power BI', tabs.PBI && tabs.PBI.Attention));
   if ((tabs.Web && tabs.Web.Count) || S.view === 'Web') kids.push(item('Web', 'Web pages', tabs.Web && tabs.Web.Attention));
@@ -484,7 +449,7 @@ function renderView(dataChanged, fresh) {
 function renderOverview(main) {
   const f = S.fleet;
   if (!f || !f.Ok) {
-    setKids(main, el('h2', { text: 'Overview' }), f ? el('div', { class: 'card empty', text: f.Error }) : loadingCard('Reading the fleet ...'));
+    setKids(main, el('h2', { text: 'Overview' }), f ? el('div', { class: 'card empty', text: f.Error }) : loadingNote('Reading the fleet ...'));
     return;
   }
   const stat = (label, n, note, sev, icon) => el('div', { class: 'card stat' + (sev ? ' tone-' + sev : ''), 'data-icon': icon },
@@ -627,7 +592,7 @@ function renderKioskTable() {
       return r * S.sort.dir;
     });
   }
-  if (!all.length) { setKids(box, S.fleet && S.fleet.Ok ? el('div', { class: 'card empty', text: `No ${tab} kiosks in the data.` }) : loadingCard('Reading the fleet ...')); return; }
+  if (!all.length) { setKids(box, S.fleet && S.fleet.Ok ? el('div', { class: 'card empty', text: `No ${tab} kiosks in the data.` }) : loadingNote('Reading the fleet ...')); return; }
   if (!rows.length) { setKids(box, el('div', { class: 'card empty', text: S.onlyProblems ? 'Nothing on this tab needs attention.' : 'Nothing matches the filter.' })); return; }
   const shown = rows.map((k) => k.Host);
   const allPicked = shown.every((h) => S.picks.has(h));
@@ -1363,8 +1328,8 @@ function drawScreens(force) {
   if (!force && sig === Sc.sig) return;
   Sc.sig = sig;
   grid.className = 'sgrid ' + Sc.size;
-  if (!Sc.loaded) { setKids(grid, loadingCard('Reading the screenshots ...')); return; }
-  if (!kiosks.length) { setKids(grid, S.fleet && S.fleet.Ok ? el('div', { class: 'card empty', text: 'No kiosks match.' }) : loadingCard('Reading the fleet ...')); return; }
+  if (!Sc.loaded) { setKids(grid, loadingNote('Reading the screenshots ...')); return; }
+  if (!kiosks.length) { setKids(grid, S.fleet && S.fleet.Ok ? el('div', { class: 'card empty', text: 'No kiosks match.' }) : loadingNote('Reading the fleet ...')); return; }
   const byHost = {};
   for (const x of Sc.list) (byHost[x.host] = byHost[x.host] || []).push(x);
   const tiles = [];
@@ -1523,7 +1488,7 @@ function renderHistory(main, force) {
   const box = $('#hbody', main);
   if (!H.host) { setKids(box, el('div', { class: 'card empty', text: 'No kiosks in the data yet.' })); return; }
   if (H.error) { setKids(box, el('div', { class: 'card empty sev-CRITICAL', text: H.error })); return; }
-  if (!H.data) { setKids(box, loadingCard('Reading the events ...')); return; }
+  if (!H.data) { setKids(box, loadingNote('Reading the events ...')); return; }
   const d = H.data;
   const k = getKiosk(d.Host);
   const stat = (label, n, note, sev, icon) => el('div', { class: 'card stat' + (sev ? ' tone-' + sev : ''), 'data-icon': icon },
@@ -1660,7 +1625,7 @@ function drawKioskList() {
   const box = $('#llist'), note = $('#lnote');
   if (!box) return;
   const d = S.klist.data;
-  if (!d) { setKids(box, loadingCard('Reading the list ...')); return; }
+  if (!d) { setKids(box, loadingNote('Reading the list ...')); return; }
   const editable = !!d.editable;
   $('#ladd').disabled = !editable;
   $('#ldown').classList.toggle('hidden', !d.path);
@@ -1801,7 +1766,7 @@ function renderActivity(main) {
       el('h2', { text: 'Activity' }),
       el('p', { class: 'sub', text: 'The output of every scan as it happens, whoever started it. Each run\'s output is kept on the server (logs/run in the data folder) for two weeks.' }),
       el('div', { class: 'toolbar', id: 'atool' }),
-      el('div', { class: 'scanpanel', id: 'scanpanel' }, irisPre(44, 26, false), el('div', { class: 'scaninfo', id: 'scaninfo' })),
+      el('div', { class: 'scanpanel', id: 'scanpanel', role: 'status' }, el('span', { class: 'scanmark', id: 'scanmark', 'aria-hidden': 'true' }), el('div', { class: 'scaninfo', id: 'scaninfo' })),
       el('pre', { class: 'console', id: 'console', tabindex: '0', 'aria-label': 'Output', text: S.run.text || 'Nothing has run since the server started.' }),
       el('h3', { text: 'REPORTS' }),
       el('div', { id: 'reports' }));
@@ -1821,27 +1786,32 @@ function renderActivity(main) {
     el('button', { class: 'btn small', type: 'button', text: 'Save output', onclick: saveOutput }));
 }
 
-// The iris turns while a scan runs; at rest, it shows how the last one went.
+// What is running and how far it is; at rest, how the last run went.
 function renderScanPanel(main, run, last) {
   const panel = $('#scanpanel', main);
   if (!panel) return;
-  setIrisLive($('pre.iris', panel), !!run);
-  panel.className = 'scanpanel ' + (run ? 'running' : last && last.Code !== 0 ? 'warn' : 'idle');
+  const failed = !run && last && last.Code !== 0;
+  const state = run ? 'running' : failed ? 'warn' : last ? 'idle' : 'none';
+  // The mark is only redrawn when the state changes, so the ring keeps turning.
+  if (panel.dataset.state !== state) {
+    panel.dataset.state = state;
+    panel.className = 'scanpanel ' + state;
+    setKids($('#scanmark', panel), run ? spinner('big') : el('span', { class: 'scanicon', 'data-icon': failed ? 'error' : last ? 'check' : 'info' }));
+  }
   const big = (t) => el('div', { class: 'scanbig', text: t });
   const kv = (k, v) => el('div', { class: 'scankv' }, el('span', { text: k }), el('span', { text: v }));
   let kids;
   if (run) {
     const pct = run.scan ? run.scan.pct : 0;
-    kids = [big(run.kind === 'scan' ? 'SCANNING' : 'RUNNING'),
+    kids = [big(run.kind === 'scan' ? 'Scan in progress' : 'Task in progress'),
       el('div', { class: 'scanbar2' }, el('i', { style: { width: pct + '%' } })),
-      kv('progress', run.scan ? `${pct}%  ${run.scan.text}` : 'starting ...'),
-      kv('task', run.title), kv('running for', run.elapsed), kv('started by', run.who)];
+      kv('Progress', run.scan ? `${pct}%  ${run.scan.text}` : 'starting ...'),
+      kv('Task', run.title), kv('Running for', run.elapsed), kv('Started by', run.who)];
   } else if (last) {
-    kids = [big(last.Code === 0 ? 'STANDING BY' : 'LAST RUN FAILED'),
-      kv('last', last.Title), kv('finished', `${last.Finished}, after ${last.Seconds}s`), kv('exit code', String(last.Code)),
-      el('div', { class: 'scanhint', text: 'Scan now (top right) starts one.' })];
+    kids = [big(last.Code === 0 ? 'Last run completed' : 'Last run failed'),
+      kv('Task', last.Title), kv('Finished', last.Finished), kv('Took', `${last.Seconds} s`), kv('Exit code', String(last.Code))];
   } else {
-    kids = [big('STANDING BY'), kv('last', 'nothing since the server started'), el('div', { class: 'scanhint', text: 'Scan now (top right) starts one.' })];
+    kids = [big('Nothing has run yet'), el('div', { class: 'scanhint', text: 'No scan since the server started. Scan now, in the bar at the top, starts one.' })];
   }
   setKids($('#scaninfo', panel), ...kids);
 }
@@ -2046,7 +2016,7 @@ function renderSettings(main, force) {
   if (!can('settings')) { setKids(main, el('div', { class: 'card empty', text: 'Settings are for admins.' })); return; }
   if ($('#settings', main) && !force) return;
   const c = S.settings;
-  if (!c) { setKids(main, el('h2', { text: 'Settings' }), loadingCard('Reading the settings ...', { id: 'settings' })); return; }
+  if (!c) { setKids(main, el('h2', { text: 'Settings' }), loadingNote('Reading the settings ...', { id: 'settings' })); return; }
   const kv = (k, v, cls) => [el('div', { class: 'k', text: k }), el('div', { class: 'v' + (cls ? ' ' + cls : ''), text: v })];
   const L = c.kioskList;
   const file = el('input', { type: 'file', accept: '.xlsx,.csv,.txt', 'aria-label': 'Kiosk list file' });
